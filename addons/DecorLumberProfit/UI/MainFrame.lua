@@ -331,12 +331,15 @@ function UI.BuildColumnsPanel(parent, anchorBtn)
     local panel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     if panel.SetBackdrop then
         panel:SetBackdrop({
-            bgFile = "Interface\\DialogBox\\UI-DialogBox-Background",
             edgeFile = "Interface\\DialogBox\\UI-DialogBox-Border",
             tile = true, tileSize = 32, edgeSize = 16,
             insets = { left = 4, right = 4, top = 4, bottom = 4 },
         })
     end
+    local bg = panel:CreateTexture(nil, "BACKGROUND")
+    bg:SetPoint("TOPLEFT", 4, -4)
+    bg:SetPoint("BOTTOMRIGHT", -4, 4)
+    bg:SetColorTexture(0, 0, 0, 0.9)
     if panel.SetFrameStrata then panel:SetFrameStrata("DIALOG") end
     if panel.SetFrameLevel then panel:SetFrameLevel(50) end
     local cols = UI.COLUMNS or {}

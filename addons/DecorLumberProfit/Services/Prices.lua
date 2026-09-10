@@ -32,7 +32,7 @@ local function CfgNumber(key, fallback)
     return (type(v) == "number") and v or fallback
 end
 
-local function GetTTL() return CfgNumber("PRICE_TTL", 900) end
+local function GetTTL() return CfgNumber("PRICE_TTL", 3600) end
 local function GetDelay() return CfgNumber("QUERY_DELAY", 0.65) end
 local function GetQueueCap() return CfgNumber("MAX_QUEUE", 400) end
 

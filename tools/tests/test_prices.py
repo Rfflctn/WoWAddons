@@ -34,6 +34,18 @@ MAP2_256963 = MAP2[256963]
     check('HasFreshPrice(256963)', 'tostring(DecorLumberProfitPrices.HasFreshPrice(256963))', 'true')
     exec_('DecorLumberProfitPrices.ClearPriceCache()')
     check('HasFreshPrice after clear', 'tostring(DecorLumberProfitPrices.HasFreshPrice(256963))', 'false')
+    # TTL поднят до 1 ч (было 15 мин — цены слетали между сессиями)
+    check('price ttl default 1h', 'DecorLumberProfitConfig.AUCTION.PRICE_TTL', '3600')
+    exec_(r'''
+TTL_SAVED_TIME = time
+DecorLumberProfitPrices.SetPrice(700100, 12345, "test")
+FRESH_NOW = DecorLumberProfitPrices.HasFreshPrice(700100)
+time = function() return TTL_SAVED_TIME() + 3700 end
+STALE_AFTER_TTL = DecorLumberProfitPrices.HasFreshPrice(700100)
+time = TTL_SAVED_TIME
+''')
+    check('fresh right after set', 'tostring(FRESH_NOW)', 'true')
+    check('stale after TTL (1h)', 'tostring(STALE_AFTER_TTL)', 'false')
     exec_(r'''
 DecorLumberProfitPrices.Enqueue({700001, 700001, 700002})
 DecorLumberProfitPrices.Enqueue({700001})

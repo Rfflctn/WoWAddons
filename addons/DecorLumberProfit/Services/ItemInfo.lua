@@ -39,14 +39,18 @@ ItemInfo._pending = {}
 -- Возвращает nil БЕЗ кэширования: вызывающий решает (pending vs пропуск).
 function ItemInfo.GetBindType(itemID)
     if type(itemID) ~= "number" then return nil end
+    -- bindType — 14-й возврат C_Item.GetItemInfo / GetItemInfo
+    -- (см. ItemDocumentation.lua:604: ...classID, subclassID, bindType...).
+    -- NB: читаем через select(14, ...), а не цепочкой `_, _, ...`:
+    -- там легко ошибиться на одно подчёркивание и начать читать subclassID (#13),
+    -- который у декора часто 0 и маскирует BoP/Warband под продаваемые.
     local bind = nil
     if C_Item and C_Item.GetItemInfo then
-        local ok, _, _, _, _, _, _, _, _, _, _, _, _, b = pcall(C_Item.GetItemInfo, itemID)
+        local ok, b = pcall(function(id) return select(14, C_Item.GetItemInfo(id)) end, itemID)
         if ok and b ~= nil then bind = b end
     end
     if bind == nil and _G.GetItemInfo then
-        local _, _, _, _, _, _, _, _, _, _, _, _, _, b = GetItemInfo(itemID)
-        bind = b
+        bind = select(14, GetItemInfo(itemID))
     end
     return bind
 end
