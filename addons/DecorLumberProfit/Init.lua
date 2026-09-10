@@ -1,6 +1,6 @@
 -- Init.lua | DecorLumberProfit | Retail 12.1.0
 -- Addon namespace (Этап 1). Грузится вторым, сразу после Locales.lua.
--- Единственный источник VERSION; общие SafeCall/CountTable/Log.
+-- VERSION дублирует ## Version из TOC; общие SafeCall/CountTable/Log.
 -- WoW Lua 5.1: no goto, no //, no bitwise ops. No WoW calls at top level.
 
 _G.DecorLumberProfit = _G.DecorLumberProfit or {}

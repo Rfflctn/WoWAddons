@@ -10,12 +10,13 @@
 
 | Задача | Куда идти |
 |---|---|
-| Сигнатура API-функции, события, константы (`C_*`, `Get*`, `Unit*`, методы виджетов) | **`tools/find-api.ps1 <имя>`** — точное имя, аргументы, возврат (из `wiki-lua/blizzard_api_doc/`) |
+| Сигнатура `C_*`, глобальной функции, события, константы или Enum | **`tools/find-api.ps1 <имя>`** — имя, аргументы, возврат (из `wiki-lua/blizzard_api_doc/`) |
+| Метод `Frame`/`Widget` или script handler | `wiki-lua/15_widget_api.md` и `wiki-lua/16_widget_script_handlers.md`; `find-api.ps1` использовать дополнительно, если метод есть в официальном API-архиве |
 | Полный список имён (grep-индекс ~всего API) | `wiki-lua/INDEX-api.md` — ТОЛЬКО grep, не читать целиком |
-| Как-то, концепции, best practices (taint, SavedVariables, TOC, якоря, меню, секреты) | тематические `wiki-lua/*.md` (см. ниже) |
+| Концепции и best practices (taint, SavedVariables, TOC, якоря, меню, секреты) | тематические `wiki-lua/*.md` (см. ниже) |
 | Инвентарь, аукцион, профессии — API соответствующих систем | `wiki-lua/blizzard_api_doc/` (C_Container, C_AuctionHouse, TradeSkill*) + `wiki-lua/pages/api/` |
 | Развёрнутые страницы wiki по конкретным функциям (примеры, note'ы) | `wiki-lua/pages/api/API_*.md` — искать по имени файла |
-| Краткие базовые гайды (33 файла, компактные) | `docs/wow_addons/*.md` |
+| Краткие базовые гайды | тематические статьи в `wiki-lua/*.md` |
 
 ## Тематические файлы wiki-lua/ (выборочно)
 
@@ -33,21 +34,45 @@
 
 ## ЖЁСТКИЕ ПРАВИЛА (экономия токенов)
 
-1. **НЕ читать целиком файлы > 100 КБ.** Только grep/Select-String с контекстом ≤ 20 строк.
+1. **НЕ читать целиком файлы > 100 КБ.** Только `Grep`/`Select-String` с контекстом ≤ 20 строк.
    Чёрный список (частые ловушки): `wiki-lua/14_world_of_warcraft_api.md`, `wiki-lua/22_scripts.md`,
    `wiki-lua/34_console_variables.md`, `wiki-lua/20_events.md`, `wiki-lua/15_widget_api.md`,
    `wiki-lua/pages/api/Global functions.md`, `wiki-lua/pages/api/World of Warcraft API*.md`,
    `wiki-lua/80_api_changes_12.1.0.md`, `wiki-lua/INDEX-api.md`.
-2. **Игнорировать:** `docs/wow_addons/*.html` (мусор скрейпера, все по 580 КБ),
-   `__pycache__/`, `wiki-lua/batch*.json`, `wiki-lua/pages/progress.log`.
-3. Для поиска API **всегда сначала `tools/find-api.ps1`**, а не ручной grep по 612 файлам.
-4. `wiki-lua/pages/api/` неполон (скрейп оборвался на ~125/6198) — если функции там нет,
-   это НЕ значит, что её нет в игре; источник истины — `wiki-lua/blizzard_api_doc/`.
-5. Ответы по API сверять с `Environment`/патчем: документы соответствуют Retail 12.1.0.
-6. Новые методы фреймов/виджетов (`Frame:*`, `GameTooltip:*`, скрипт-хендлеры) — ТОЛЬКО после проверки существования: `C_*` через `tools/find-api.ps1`, виджеты — grep по `wiki-lua/15_widget_api.md` / `16_widget_script_handlers.md`. Midnight удаляет API без обратной совместимости (прецедент 2.0.0: `SetMinResize`/`SetMaxResize` → `SetResizeBounds`; lupa-стабы маскируют такие баги — любой метод существует в тестах). Критичные вызовы при создании окна — за гардами (`if f.Method then`), чтобы окно открывалось при любых изменениях API.
+2. **Игнорировать:** `docs/wow_addons/` и `docs/wow_addons/*.html` (если появятся — мусор скрейпера),
+    `__pycache__/`, `wiki-lua/batch*.json`, `wiki-lua/pages/progress.log`.
+3. Для `C_*`, глобальных функций, событий, констант и Enum **всегда сначала
+   `tools/find-api.ps1`**, а не ручной поиск по 612 файлам.
+4. `wiki-lua/pages/api/` — вспомогательный и неполный архив; если функции там нет,
+    это НЕ значит, что её нет в игре; источник истины — `wiki-lua/blizzard_api_doc/`.
+5. Ответы по API сверять с patch/build: локальный архив соответствует Retail 12.1.0,
+   build 69283. Для другого patch/build локальные документы недостаточны без отдельной проверки.
+6. Новые методы фреймов/виджетов и script handlers проверять до написания кода.
+   Midnight удаляет API без обратной совместимости (например, `SetMinResize`/
+   `SetMaxResize` → `SetResizeBounds`), а lupa-стабы маскируют такие ошибки.
+   Защищённый вызов должен иметь fallback или запись `WARN` в `Diag`; guard не
+   должен молча скрывать поломку обязательного API.
+7. История аддона ведётся в `addons/DecorLumberProfit/CHANGELOG.md`.
+   CHANGELOG append-only: не читать файл целиком и не переписывать старые записи.
+   Для новой записи найти `## [Unreleased]` через grep, прочитать только небольшой
+   контекст вокруг него и добавить нужный пункт в этот раздел. При релизе добавить
+   новый release-блок сразу под `Unreleased`, оставив старую историю без изменений.
+8. Версия-источник хранится в `DecorLumberProfit.toc` (`## Version`).
+   `Init.lua:VERSION` и последний release-заголовок CHANGELOG обязаны совпадать.
+   Использовать формат `MAJOR.MINOR.PATCH`: MAJOR — несовместимые изменения,
+   MINOR — новые возможности без поломки совместимости, PATCH — исправления.
+   Перед релизом запускать `python tools/check_version.py`. Изменение `DB_SCHEMA`
+   сопровождать описанием миграции и совместимости со старыми SavedVariables.
+9. После правок выполнять минимально подходящие проверки: для Lua —
+   `syntax_check.py`, для логики — `run_tests.py`, для локалей — `check_locales.py`,
+   для версии — `check_version.py`. Новые WoW API, события, UI и аукцион требуют
+   также ручного smoke-test в клиенте или явной отметки, что он не выполнен.
+10. Не изменять несвязанные файлы, не откатывать существующие изменения, не запускать
+    `fetch_*.py`, не коммитить и не отправлять изменения без явного запроса пользователя.
 
 ## Поддерживающие скрипты
 
 - `tools/find-api.ps1 <query> [-Max N]` — поиск функции/события/метода виджета: имя, файл:строка, аргументы, возврат (~500 токенов вместо тысяч).
 - `tools/build-index.ps1` — перегенерировать `wiki-lua/INDEX-api.md` (после обновления blizzard_api_doc).
+- `python tools/check_version.py` — проверить `.toc`, `Init.lua` и последний release CHANGELOG.
 - `wiki-lua/fetch_wiki.py`, `wiki-lua/fetch_pages.py`, `wiki-lua/fetch_blizzard_api_doc.py` — скачивание доков (нужен internet).

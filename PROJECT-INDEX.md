@@ -1,7 +1,7 @@
 # PROJECT-INDEX.md — быстрый ориентир для агентов (читать ПЕРВЫМ, ~1 мин)
 
 > Источник истины по маршрутизации — `AGENTS.md`. Этот файл — только карта.
-> Патч: Retail 12.1.0 / Midnight. Обновлено: 2026-09-10 (релиз 2.0.0: 20×Lua, виртуализация, ресайз).
+> Патч: Retail 12.1.0 / Midnight. Обновлено: 2026-09-11 (релиз 2.0.0: 20×Lua, виртуализация, ресайз).
 > **Правило слоёв:** §0–§2 — читать всегда. §3 (`wiki-lua/`) — ТОЛЬКО если задача прошла гейт ниже.
 
 ## 0. Дерево (корень `W:\Projects\WoW Addons\`)
@@ -11,7 +11,7 @@ AGENTS.md                  # маршрутизация и жёсткие пра
 PROJECT-INDEX.md           # этот файл
 opencode.json              # конфиг модели (lmstudio, локалка)
 addons/DecorLumberProfit/   # ЕДИНСТВЕННЫЙ аддон с кодом (TOC + 20×Lua: см. §2)
-tools/                     # поиск API, проверки, тесты: run_tests.py + tests/test_*.py (6 сьютов)
+tools/                     # поиск API, проверки, тесты: run_tests.py + tests/test_*.py (11 сьютов)
 wiki-lua/                  # архив доков (~8 тыс. файлов) — СМ. ГЕЙТ В §1, по умолчанию НЕ трогать
 ```
 
@@ -39,8 +39,8 @@ wiki-lua/                  # архив доков (~8 тыс. файлов) —
 - `addons/DecorLumberProfit/UI/Actions.lua` — скан/DB/цены/очистка; `UI/Commands.lua` — slash + события; `UI/Status.lua` — `SetStatus` (+цвет точки); `UI/Tooltip.lua` — тултипы (item-ссылки `SetItemByID` с фолбэком); `UI/Popups.lua` — StaticPopup.
 - `addons/DecorLumberProfit/Services/Diag.lua` — диагностика: `Diag.Log` (уровни ERROR/WARN/INFO/VERBOSE), `lastError`, `SubsystemStatus`, `/dlp debug status|selftest|verbose on|off`, `/dlp bug` (бандл для issue).
 - `addons/DecorLumberProfit/Locales.lua` — тексты `enUS`/`ruRU` (`L[]`/`TL()`).
-- `addons/DecorLumberProfit/README.md` — ТЗ, формулы, установка.
-- Проверки после правок Lua: `python tools/syntax_check.py` → `python tools/run_tests.py` → `python tools/check_locales.py` (строгий: missing/diff/fmt = FAIL). `tools/smoke_test.py` — legacy (загрузчик синхронизирован с `.toc`, гейтом не является).
+- `addons/DecorLumberProfit/README.md` — ТЗ, формулы, установка; `CHANGELOG.md` — история релизов и изменений.
+- Проверки после правок Lua: `python tools/syntax_check.py` → `python tools/run_tests.py` → `python tools/check_locales.py` (строгий: missing/diff/fmt = FAIL). При изменении версии запускать `python tools/check_version.py`. `tools/smoke_test.py` — legacy (загрузчик синхронизирован с `.toc`, гейтом не является).
 - Тесты: `tools/tests/stub.lua` (стабы WoW, STUB v1) + `tools/tests/test_*.py`: `test_money`, `test_economy`, `test_recipes` (Scan active/all, ветки ошибок, флаги), `test_prices`, `test_wood` (+parity Wood≡Config), `test_diag`, `test_init` (контракт SafeCall!), `test_iteminfo`, `test_store` (Upgrade/adopt/cap), `test_tableview` (VisibleRange, ColWidth), `test_removed_apis` (denylist удалённых Midnight-API: lupa-стабы их не ловят). Порядок загрузки Lua читается из `.toc`, у каждого сьюта свежий рантайм (изоляции, зависимости между сьютами запрещены).
 - Пути относительные от корня; абсолютных `W:\...` быть не должно. Имя папки аддона = имени `.toc`.
 
@@ -51,7 +51,8 @@ wiki-lua/                  # архив доков (~8 тыс. файлов) —
 
 | Нужно | Действие (не читать файлы целиком!) |
 |---|---|
-| Сигнатура `C_*` / событие / метод виджета | `powershell -File tools/find-api.ps1 "<Имя>"` — ЕДИНСТВЕННЫЙ вход, не грепать 612 файлов вручную |
+| Сигнатура `C_*` / глобальная функция / событие / Enum | `powershell -File tools/find-api.ps1 "<Имя>"` — первый вход, не грепать 612 файлов вручную |
+| Метод виджета / script handler | `wiki-lua/15_widget_api.md` и `wiki-lua/16_widget_script_handlers.md`; `find-api.ps1` — дополнительно при наличии записи в официальном архиве |
 | Концепция (taint, SavedVariables, TOC, якоря, меню) | `wiki-lua/<тема>.md` по списку из `AGENTS.md` |
 | Пример / patch changes функции | `wiki-lua/pages/api/API_<Имя>.md` — поиск по имени файла |
 | Аргументы события | `wiki-lua/pages/events/<Имя>.md` — поиск по имени файла |
