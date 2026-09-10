@@ -47,7 +47,10 @@ function Core:ResolvePendingBind()
     return {}
 end
 
--- Удаляет из списка рецепты с непродаваемой (привязанной) продукцией; unsell==nil (данные ещё грузятся) оставляет, ждём ResolvePendingBind
+-- Удаляет из списка рецепты с непродаваемой продукцией:
+-- BoP (bind 1, "Становится персональным при получении") и Warband
+-- (bind 8/9, "Привязывается к отряду") + прочие не из белого списка 0/2.
+-- unsell==nil (данные ещё грузятся) оставляет, ждём ResolvePendingBind
 function Core:PruneUnsellable(list)
     local M = _G.DecorLumberProfitItemInfo
     if M and M.PruneUnsellable then return M.PruneUnsellable(list) end

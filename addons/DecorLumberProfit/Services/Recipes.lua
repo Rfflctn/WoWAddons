@@ -686,6 +686,10 @@ function Recipes.Scan(opts)
     if not ids or #ids == 0 then return {}, "WOOD_ID_NOT_SET" end
     local Core = _G.DecorLumberProfitCore
     local ItemInfo = _G.DecorLumberProfitItemInfo
+    -- Tri-state привязки выхода (см. Services/ItemInfo.lua):
+    -- true = непродаваемый (BoP bind 1 "Становится персональным при получении",
+    --   Warband bind 8/9 "Привязывается к отряду", прочие не из 0/2) — пропускаем;
+    -- nil = данные грузятся — паркуем в pending до GET_ITEM_INFO_RECEIVED.
     local function unsell(itemID)
         if ItemInfo and ItemInfo.IsUnsellable then return ItemInfo.IsUnsellable(itemID) end
         return false

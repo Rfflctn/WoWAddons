@@ -634,7 +634,18 @@ function Auction.CollectPricesForRecipes(recipes)
     end
 
     for _, rec in ipairs(recipes) do
-        if rec.outputItemID then Collect(rec.outputItemID) end
+        -- Выход с BoP (bind 1) / Warband (bind 8/9) на АХ не продаётся:
+        -- цену не ищем и очередь АХ такими предметами не засоряем.
+        -- (Сюда они попадать не должны — Scan/Store их режут, — но guard дешёвый.)
+        if rec.outputItemID then
+            local skip = false
+            local ItemInfo = _G.DecorLumberProfitItemInfo
+            if ItemInfo and ItemInfo.IsUnsellable then
+                local ok, u = pcall(ItemInfo.IsUnsellable, rec.outputItemID)
+                if ok and u == true then skip = true end
+            end
+            if not skip then Collect(rec.outputItemID) end
+        end
         for _, r in ipairs(rec.reagents or {}) do
             if type(r.itemID) == "number" then Collect(r.itemID) end
         end

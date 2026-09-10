@@ -6,11 +6,28 @@
 DecorLumberProfitItemInfo = {}
 local ItemInfo = DecorLumberProfitItemInfo
 
--- Enum.ItemBind (14-й возврат C_Item.GetItemInfo):
--- 0=None, 1=OnAcquire(BoP), 2=OnEquip(BoE), 3=OnUse/"в отряде, на арене или в рейде", 4=Quest, 7=Account, 8=Warband, 9=Warband-until-equipped
+-- Enum.ItemBind (14-й возврат C_Item.GetItemInfo / GetItemInfo):
+-- 0=None, 1=OnAcquire, 2=OnEquip, 3=OnUse, 4=Quest, 5=Unused1, 6=Unused2,
+-- 7=ToWoWAccount, 8=ToBnetAccount, 9=ToBnetAccountUntilEquipped
+-- (см. wiki-lua/blizzard_api_doc/ItemConstantsDocumentation.lua:179-195).
+-- Русские тултипы клиента:
+--  1 = "Становится персональным при получении" (BoP),
+--  8 = "Привязывается к отряду" (Warband),
+--  9 = "Привязывается к отряду до надевания" (Warband-until-equipped).
 -- На АХ выставляются только 0 (без привязки) и 2 (BoE до экипировки) — используем белый список.
--- 3 (привязка при присоединении к отряду/рейду) явно ИСКЛЮЧЁН.
+-- 1/8/9 явно ИСКЛЮЧЕНЫ (рецепты с такой продукцией не учитываются).
+ItemInfo.BIND_NONE = 0
+ItemInfo.BIND_ON_ACQUIRE = 1 -- BoP: "Становится персональным при получении"
+ItemInfo.BIND_ON_EQUIP = 2 -- BoE
+ItemInfo.BIND_ON_USE = 3
+ItemInfo.BIND_QUEST = 4
+ItemInfo.BIND_ACCOUNT = 7
+ItemInfo.BIND_WARBAND = 8 -- "Привязывается к отряду"
+ItemInfo.BIND_WARBAND_UNTIL_EQUIPPED = 9 -- "Привязывается к отряду до надевания"
 local ITEM_BIND_SELLABLE = { [0] = true, [2] = true }
+-- Явный блок-лист из запроса: BoP + Warband всегда непродаваемы,
+-- даже если белый список выше когда-либо расширят.
+local ITEM_BIND_EXCLUDED = { [1] = true, [8] = true, [9] = true }
 
 ItemInfo._bindCache = {}
 ItemInfo._nameCache = {}
@@ -18,9 +35,10 @@ ItemInfo._loadRequested = {}
 -- Рецепты, ожидающие загрузки bindType: [spellID] = rec
 ItemInfo._pending = {}
 
-function ItemInfo.IsUnsellable(itemID)
-    if type(itemID) ~= "number" then return false end
-    if ItemInfo._bindCache[itemID] ~= nil then return ItemInfo._bindCache[itemID] end
+-- Сырой bindType предмета (Enum.ItemBind) или nil, если данные ещё грузятся.
+-- Возвращает nil БЕЗ кэширования: вызывающий решает (pending vs пропуск).
+function ItemInfo.GetBindType(itemID)
+    if type(itemID) ~= "number" then return nil end
     local bind = nil
     if C_Item and C_Item.GetItemInfo then
         local ok, _, _, _, _, _, _, _, _, _, _, _, _, b = pcall(C_Item.GetItemInfo, itemID)
@@ -30,6 +48,21 @@ function ItemInfo.IsUnsellable(itemID)
         local _, _, _, _, _, _, _, _, _, _, _, _, _, b = GetItemInfo(itemID)
         bind = b
     end
+    return bind
+end
+
+-- true — bind точно непродаваемый (в т.ч. BoP=1, Warband=8/9);
+-- false — продаваемый (0/2); nil — данные ещё грузятся.
+function ItemInfo.IsBindUnsellable(bind)
+    if bind == nil then return nil end
+    if ITEM_BIND_EXCLUDED[bind] then return true end
+    return not ITEM_BIND_SELLABLE[bind]
+end
+
+function ItemInfo.IsUnsellable(itemID)
+    if type(itemID) ~= "number" then return false end
+    if ItemInfo._bindCache[itemID] ~= nil then return ItemInfo._bindCache[itemID] end
+    local bind = ItemInfo.GetBindType(itemID)
     if bind == nil then
         -- предмет не в кэше клиента — запрашиваем асинхронную загрузку с сервера
         if not ItemInfo._loadRequested[itemID] and _G.Item and Item.CreateFromItemID then
@@ -41,7 +74,7 @@ function ItemInfo.IsUnsellable(itemID)
         end
         return nil
     end
-    local r = not ITEM_BIND_SELLABLE[bind]
+    local r = ItemInfo.IsBindUnsellable(bind)
     ItemInfo._bindCache[itemID] = r
     return r
 end
@@ -99,7 +132,8 @@ function ItemInfo.ResolvePending()
     return resolved
 end
 
--- Удаляет из списка рецепты с непродаваемой продукцией; unsell==nil оставляет
+-- Удаляет из списка рецепты с непродаваемой продукцией
+-- (BoP bind 1, Warband bind 8/9 и остальные не из белого списка 0/2); unsell==nil оставляет
 function ItemInfo.PruneUnsellable(list)
     if not list then return 0 end
     local removed = 0

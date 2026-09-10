@@ -563,7 +563,9 @@ function UI.RefreshTable()
     if not mainFrame or not scrollChild then return end
     local currentRecipes = UI._currentRecipes
     local displayList = UI._displayList
-    -- Принудительно убираем рецепты с привязанной (непродаваемой) продукцией — "привязано к отряду" и т.п.
+    -- Принудительно убираем рецепты с непродаваемой продукцией — BoP
+    -- ("Становится персональным при получении", bind 1) и Warband
+    -- ("Привязывается к отряду", bind 8/9).
     -- (старые записи, добавленные до включения фильтра, могут оставаться в currentRecipes/SavedVariables)
     local removed = DecorLumberProfitCore:PruneUnsellable(currentRecipes)
     if removed and removed > 0 then

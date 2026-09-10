@@ -86,10 +86,33 @@ function Store.EnforceCap()
     return removed
 end
 
+-- Удаляет из SavedVariables рецепты с непродаваемой продукцией
+-- (BoP bind 1, Warband bind 8/9 и остальные не из белого списка 0/2).
+-- bind==nil (данные предмета ещё грузятся) — оставляем, решит LoadSavedRecipes/ResolvePending.
+-- Возвращает число удалённых записей.
+function Store.PurgeUnsellable()
+    local db = _G.DecorLumberProfitDB
+    if not (db and db.recipes) then return 0 end
+    local ItemInfo = _G.DecorLumberProfitItemInfo
+    if not (ItemInfo and ItemInfo.IsUnsellable) then return 0 end
+    local removed = 0
+    for spellID, ser in pairs(db.recipes) do
+        if type(ser) == "table" and ser.outputItemID then
+            local ok, u = pcall(ItemInfo.IsUnsellable, ser.outputItemID)
+            if ok and u == true then
+                db.recipes[spellID] = nil
+                removed = removed + 1
+            end
+        end
+    end
+    return removed
+end
+
 -- Точка входа при ADDON_LOADED (вызывает UI): adopt -> ensure -> migrate -> stamp.
 function Store.Upgrade()
     AdoptLegacyNames()
     EnsureTables()
+    Store.PurgeUnsellable() -- чистка сейвов от BoP/Warband-выходов (см. ItemInfo)
     local Addon = _G.DecorLumberProfit
     local target = (Addon and Addon.DB_SCHEMA) or 1
     local schema = DecorLumberProfitDB.schemaVersion or 0
@@ -161,8 +184,19 @@ end
 -- проверено, что НЕ знает; записи ДРУГИХ персонажей не трогаем.
 -- ser.learned — "знает хоть кто-то" (OR по learnedBy, legacy-фолбэк для старых сейвов).
 -- rec.learned == nil (API не ответил) — learned/learnedBy не трогаем, прежнее не затираем.
+-- BoP ("Становится персональным при получении", bind 1) и Warband
+-- ("Привязывается к отряду", bind 8/9) в базу НЕ пишем: их нельзя продать на АХ.
 function Store.SaveRecipe(rec)
     if not rec or not rec.recipeSpellID then return end
+    local ItemInfo = _G.DecorLumberProfitItemInfo
+    if ItemInfo and ItemInfo.IsUnsellable and rec.outputItemID then
+        local ok, u = pcall(ItemInfo.IsUnsellable, rec.outputItemID)
+        if ok and u == true then
+            local db0 = DecorLumberProfitDB and DecorLumberProfitDB.recipes
+            if db0 then db0[rec.recipeSpellID] = nil end
+            return nil
+        end
+    end
     local db = EnsureRecipes()
     local ser = Store.SerializeRecipe(rec)
     local existing = db[rec.recipeSpellID]
