@@ -14,7 +14,9 @@ local ItemInfo = DecorLumberProfitItemInfo
 --  1 = "Становится персональным при получении" (BoP),
 --  8 = "Привязывается к отряду" (Warband),
 --  9 = "Привязывается к отряду до надевания" (Warband-until-equipped).
--- На АХ выставляются только 0 (без привязки) и 2 (BoE до экипировки) — используем белый список.
+-- На АХ выставляются 0 (без привязки), 2 (BoE до экипировки) и 3 (BoU:
+-- "Использование: ...", продаётся до использования — кодексы, инструменты,
+-- маунты) — используем белый список.
 -- 1/8/9 явно ИСКЛЮЧЕНЫ (рецепты с такой продукцией не учитываются).
 ItemInfo.BIND_NONE = 0
 ItemInfo.BIND_ON_ACQUIRE = 1 -- BoP: "Становится персональным при получении"
@@ -24,7 +26,7 @@ ItemInfo.BIND_QUEST = 4
 ItemInfo.BIND_ACCOUNT = 7
 ItemInfo.BIND_WARBAND = 8 -- "Привязывается к отряду"
 ItemInfo.BIND_WARBAND_UNTIL_EQUIPPED = 9 -- "Привязывается к отряду до надевания"
-local ITEM_BIND_SELLABLE = { [0] = true, [2] = true }
+local ITEM_BIND_SELLABLE = { [0] = true, [2] = true, [3] = true }
 -- Явный блок-лист из запроса: BoP + Warband всегда непродаваемы,
 -- даже если белый список выше когда-либо расширят.
 local ITEM_BIND_EXCLUDED = { [1] = true, [8] = true, [9] = true }
@@ -56,7 +58,7 @@ function ItemInfo.GetBindType(itemID)
 end
 
 -- true — bind точно непродаваемый (в т.ч. BoP=1, Warband=8/9);
--- false — продаваемый (0/2); nil — данные ещё грузятся.
+-- false — продаваемый (0/2/3); nil — данные ещё грузятся.
 function ItemInfo.IsBindUnsellable(bind)
     if bind == nil then return nil end
     if ITEM_BIND_EXCLUDED[bind] then return true end
@@ -137,7 +139,7 @@ function ItemInfo.ResolvePending()
 end
 
 -- Удаляет из списка рецепты с непродаваемой продукцией
--- (BoP bind 1, Warband bind 8/9 и остальные не из белого списка 0/2); unsell==nil оставляет
+-- (BoP bind 1, Warband bind 8/9 и остальные не из белого списка 0/2/3); unsell==nil оставляет
 function ItemInfo.PruneUnsellable(list)
     if not list then return 0 end
     local removed = 0

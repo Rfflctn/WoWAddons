@@ -715,13 +715,29 @@ function Recipes.Scan(opts)
     local maxResults = Recipes.MaxResults()
     local results = {}
     local scanned, noOutput, noWood, notLearned, bindSkipped, bindPending = 0, 0, 0, 0, 0, 0
+    -- Образец пропущенных как непродаваемые (первые 8: имя + bind) и гистограмма
+    -- bind-значений — чтобы "пропущено N" было видно поимённо (/dlp debug skipped).
+    local skippedSample, bindHistogram = {}, {}
+    local function noteSkipped(spellID, data)
+        bindSkipped = bindSkipped + 1
+        local b = nil
+        if ItemInfo and ItemInfo.GetBindType and data and data.outputItemID then
+            b = ItemInfo.GetBindType(data.outputItemID)
+        end
+        local hk = (b == nil) and "nil" or tostring(b)
+        bindHistogram[hk] = (bindHistogram[hk] or 0) + 1
+        if #skippedSample < 8 then
+            table.insert(skippedSample, { spellID = spellID, name = data and data.name,
+                outputItemID = data and data.outputItemID, bind = b })
+        end
+    end
     for _, spellID in ipairs(candidates) do
         scanned = scanned + 1
         local data = Recipes.GetRecipeData(spellID)
         if data and data.outputItemID and data.woodQty then
             local u = unsell(data.outputItemID)
             if u == true then
-                bindSkipped = bindSkipped + 1
+                noteSkipped(spellID, data)
             elseif u == nil then
                 if ItemInfo and ItemInfo.PendingAdd then ItemInfo.PendingAdd(spellID, data) end
                 bindPending = bindPending + 1
@@ -747,11 +763,14 @@ function Recipes.Scan(opts)
     end
     -- Если в активном окне есть кандидаты, но ни один не содержит древесину — спец. ошибка с диагностикой
     if scope ~= "all" and #results == 0 and #candidates > 0 then
-        return {}, "NO_WOOD_IN_ACTIVE_CANDIDATES", { scanned = scanned, found = 0, noOutput = noOutput, noWood = noWood, notLearned = notLearned, bindSkipped = bindSkipped, bindPending = bindPending, candidateCount = #candidates, activeSkillLines = activeLines }
+        Recipes._lastSkipped = skippedSample
+        return {}, "NO_WOOD_IN_ACTIVE_CANDIDATES", { scanned = scanned, found = 0, noOutput = noOutput, noWood = noWood, notLearned = notLearned, bindSkipped = bindSkipped, bindPending = bindPending, candidateCount = #candidates, activeSkillLines = activeLines, skippedSample = skippedSample, bindHistogram = bindHistogram }
     end
     table.sort(results, function(a, b) return (a.name or "") < (b.name or "") end)
+    Recipes._lastSkipped = skippedSample
     local meta = { scanned = scanned, found = #results, noOutput = noOutput, noWood = noWood,
-        notLearned = notLearned, bindSkipped = bindSkipped, bindPending = bindPending }
+        notLearned = notLearned, bindSkipped = bindSkipped, bindPending = bindPending,
+        skippedSample = skippedSample, bindHistogram = bindHistogram }
     if scope ~= "all" then
         meta.candidateCount = #candidates
         meta.activeSkillLines = activeLines
@@ -858,6 +877,14 @@ end
 function Recipes.DebugSpell(spellID)
     local data = Recipes.GetRecipeData(spellID)
     if not data then return { err = "no schematic", spellID = spellID } end
+    local bindType, unsell = nil, nil
+    if data.outputItemID then
+        local M = _G.DecorLumberProfitItemInfo
+        if M then
+            if M.GetBindType then bindType = M.GetBindType(data.outputItemID) end
+            if M.IsUnsellable then unsell = M.IsUnsellable(data.outputItemID) end
+        end
+    end
     return {
         spellID = spellID,
         name = data.name,
@@ -867,7 +894,15 @@ function Recipes.DebugSpell(spellID)
         reagents = data.reagents,
         schematic = data.schematic and #data.schematic.reagentSlotSchematics or 0,
         info = data.recipeInfo,
+        bindType = bindType,
+        unsellable = unsell,
     }
+end
+
+-- Образец рецептов, пропущенных последним Scan как непродаваемые
+-- (заполняется в Scan; пусто до первого скана). Для /dlp debug skipped.
+function Recipes.LastSkipped()
+    return Recipes._lastSkipped or {}
 end
 
 function Recipes.HealthCheck()

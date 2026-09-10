@@ -49,7 +49,7 @@ end
 
 -- Удаляет из списка рецепты с непродаваемой продукцией:
 -- BoP (bind 1, "Становится персональным при получении") и Warband
--- (bind 8/9, "Привязывается к отряду") + прочие не из белого списка 0/2.
+-- (bind 8/9, "Привязывается к отряду") + прочие не из белого списка 0/2/3.
 -- unsell==nil (данные ещё грузятся) оставляет, ждём ResolvePendingBind
 function Core:PruneUnsellable(list)
     local M = _G.DecorLumberProfitItemInfo
@@ -110,6 +110,20 @@ function Core:DebugSpell(spellID)
     local R = _G.DecorLumberProfitRecipes
     if R and R.DebugSpell then return R.DebugSpell(spellID) end
     return { err = "recipes module missing", spellID = spellID }
+end
+
+-- Образец рецептов, пропущенных последним сканом как непродаваемые
+-- (для /dlp debug skipped). Короткая проверка bind: /dump Core:GetOutputBindType(id)
+function Core:LastSkipped()
+    local R = _G.DecorLumberProfitRecipes
+    if R and R.LastSkipped then return R.LastSkipped() end
+    return {}
+end
+
+function Core:GetOutputBindType(itemID)
+    local M = _G.DecorLumberProfitItemInfo
+    if M and M.GetBindType then return M.GetBindType(itemID) end
+    return nil
 end
 
 -- Поиск — unified Recipes.Scan (Этап 4). Врапперы сохраняют коды ошибок.

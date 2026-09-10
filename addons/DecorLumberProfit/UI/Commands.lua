@@ -76,6 +76,25 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             elseif msg == "debug selftest" then
                 local D = _G.DecorLumberProfitDiag
                 if D and D.PrintSelfTest then D.PrintSelfTest() else print(L.PREFIX_ERR .. "Diag missing") end
+            elseif msg == "debug skipped" then
+                -- Поимённый список рецептов, пропущенных как непродаваемые
+                -- (вместо голого счётчика "пропущено N" в статусе скана).
+                local C = _G.DecorLumberProfitCore
+                if C and C.FindWoodRecipesInActiveWindow and C.LastSkipped then
+                    local _, serr, smeta = C:FindWoodRecipesInActiveWindow()
+                    local sk = C:LastSkipped()
+                    local total = (smeta and smeta.bindSkipped) or #sk
+                    print(L.PREFIX_OK .. string.format("unsellable skipped: %d, sample %d:", total, #sk))
+                    for i, s in ipairs(sk) do
+                        print(string.format("  %d. %s (spell %s, out %s, bind %s)",
+                            i, tostring(s.name), tostring(s.spellID),
+                            tostring(s.outputItemID), tostring(s.bind)))
+                        if i >= 10 then break end
+                    end
+                    if #sk == 0 then print(L.PREFIX_OK .. tostring(serr or "none skipped")) end
+                else
+                    print(L.PREFIX_ERR .. "Core missing")
+                end
             elseif msg == "bug" then
                 local D = _G.DecorLumberProfitDiag
                 if D and D.PrintBug then D.PrintBug() else print(L.PREFIX_ERR .. "Diag missing") end

@@ -41,6 +41,13 @@ DS = DecorLumberProfitCore:DebugSpell(424242)
     check('debug active wood count', '#DA.woodIDs', '12')
     check('debug spell name', 'DS.name', 'Craft Oak Output')
     check('debug spell woodQty', 'DS.woodQty', '2')
+    # stub C_Item отдаёт bindType 0 => продаваемый
+    check('debug spell bindType', 'DS.bindType', '0')
+    check('debug spell unsellable=false', 'tostring(DS.unsellable)', 'false')
+    check('scan meta skippedSample empty', '#SCAN_META.skippedSample', '0')
+    check('scan meta bindHistogram present', 'tostring(SCAN_META.bindHistogram ~= nil)', 'true')
+    exec_('LSK = DecorLumberProfitCore:LastSkipped()')
+    check('last skipped empty', '#LSK', '0')
 
     # ---- flags ----
     check('bruteforce default on', 'tostring(DecorLumberProfitRecipes.BruteForceEnabled())', 'true')
@@ -98,3 +105,15 @@ DecorLumberProfitWood.IDS = SAVED_WOOD_IDS
 DecorLumberProfitConfig.WOOD_ITEM_IDS = SAVED_CFG_IDS
 ''')
     check('scan no wood ids err', 'E3E', 'WOOD_ID_NOT_SET')
+
+    # ---- bind Trieste: 3 (OnUse) продаваемый, 4 (Quest) нет ----
+    exec_(r'''
+DecorLumberProfitItemInfo._bindCache = {}
+C_Item.GetItemInfo = function(id) return "n","l",1,1,1,"t","s",1,"",1,1,1,1,3,1,nil,false end
+B3 = DecorLumberProfitCore:IsOutputUnsellable(555001)
+C_Item.GetItemInfo = function(id) return "n","l",1,1,1,"t","s",1,"",1,1,1,1,4,1,nil,false end
+DecorLumberProfitItemInfo._bindCache = {}
+B4 = DecorLumberProfitCore:IsOutputUnsellable(555002)
+''')
+    check('bind 3 OnUse sellable=false', 'tostring(B3)', 'false')
+    check('bind 4 Quest unsellable=true', 'tostring(B4)', 'true')
