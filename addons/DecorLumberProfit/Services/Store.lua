@@ -17,6 +17,23 @@ local function Now()
     return 0
 end
 
+local function CurrentPlayer()
+    if _G.UnitName then
+        local ok, name = pcall(_G.UnitName, "player")
+        if ok and type(name) == "string" and name ~= "" then return name end
+    end
+    return "player"
+end
+
+-- Есть ли хоть один персонаж, знающий рецепт (значения learnedBy — явные boolean)
+local function HasAnyLearner(learnedBy)
+    if type(learnedBy) ~= "table" then return false end
+    for _, v in pairs(learnedBy) do
+        if v == true then return true end
+    end
+    return false
+end
+
 local function CountTable(t)
     local Addon = _G.DecorLumberProfit
     if Addon and Addon.CountTable then return Addon.CountTable(t) end
@@ -133,15 +150,22 @@ function Store.SerializeRecipe(rec)
     }
 end
 
--- Сохраняет snapshot рецепта в общую базу (не перетирая learned-флаг других персонажей)
+-- Сохраняет snapshot рецепта в общую базу (account-wide).
+-- learned — пер-персонажный флаг: learnedBy[player]=true — знает, =false —
+-- проверено, что НЕ знает; записи ДРУГИХ персонажей не трогаем.
+-- ser.learned — "знает хоть кто-то" (OR по learnedBy, legacy-фолбэк для старых сейвов).
+-- rec.learned == nil (API не ответил) — learned/learnedBy не трогаем, прежнее не затираем.
 function Store.SaveRecipe(rec)
     if not rec or not rec.recipeSpellID then return end
     local db = EnsureRecipes()
     local ser = Store.SerializeRecipe(rec)
     local existing = db[rec.recipeSpellID]
     if existing then
-        ser.learnedBy = existing.learnedBy or {}
-        ser.savedAt = existing.savedAt -- возраст записи не омолаживаем апдейтами
+        if type(existing.learnedBy) == "table" then
+            ser.learnedBy = existing.learnedBy
+        else
+            ser.learnedBy = {}
+        end        ser.savedAt = existing.savedAt -- возраст записи не омолаживаем апдейтами
         -- обновляем только если пришли более полные данные (есть reagents)
         if not (ser.reagents and #ser.reagents > 0) and existing.reagents and #existing.reagents > 0 then
             ser.reagents = existing.reagents
@@ -149,6 +173,20 @@ function Store.SaveRecipe(rec)
     else
         ser.learnedBy = {}
         ser.savedAt = Now()
+    end
+    local player = CurrentPlayer()
+    if rec.learned == true then
+        ser.learnedBy[player] = true
+        ser.learned = true
+    elseif rec.learned == false then
+        ser.learnedBy[player] = false
+        ser.learned = HasAnyLearner(ser.learnedBy) and true or false
+    else
+        if existing then
+            ser.learned = existing.learned
+        else
+            ser.learned = nil
+        end
     end
     ser.updatedAt = Now()
     db[rec.recipeSpellID] = ser
@@ -162,7 +200,7 @@ function Store.MarkLearnedBy(spellID)
     local ser = db[spellID]
     if not ser then return end
     ser.learnedBy = ser.learnedBy or {}
-    ser.learnedBy[_G.UnitName and UnitName("player") or "player"] = true
+    ser.learnedBy[CurrentPlayer()] = true
     ser.learned = true
 end
 
@@ -179,6 +217,15 @@ function Store.LoadSavedRecipes()
         if type(ser) == "table" and ser.recipeSpellID then
             local rec = {}
             for k, v in pairs(ser) do rec[k] = v end
+            -- learned текущего персонажа: приоритет — его запись в learnedBy,
+            -- иначе legacy-фолбэк ser.learned (сейвы до пер-персонажного учёта)
+            if type(ser.learnedBy) == "table" then
+                local mine = ser.learnedBy[CurrentPlayer()]
+                if mine ~= nil then rec.learned = mine and true or false end
+            else
+                rec.learnedBy = {}
+            end
+            if type(rec.learnedBy) ~= "table" then rec.learnedBy = {} end
             local u = nil
             if rec.outputItemID then u = unsell(rec.outputItemID) end
             if u == true then
@@ -213,6 +260,8 @@ function Store.SavedRecipeCount()
 end
 
 -- Пересчитывает learned для загруженных рецептов по живому API (для текущего персонажа)
+-- и СРАЗУ сохраняет результат в DB, чтобы пережить /reload без повторного скана.
+-- info.learned == nil (API не ответил) — ни память, ни DB не трогаем.
 function Store.RefreshLearnedFlags(list)
     if not C_TradeSkillUI or not C_TradeSkillUI.GetRecipeInfo then return end
     local Addon = _G.DecorLumberProfit
@@ -220,18 +269,26 @@ function Store.RefreshLearnedFlags(list)
         if Addon and Addon.SafeCall then return Addon.SafeCall(func, ...) end
         return nil
     end
-    local player = (_G.UnitName and UnitName("player")) or "player"
+    local player = CurrentPlayer()
     for _, rec in ipairs(list) do
         if rec.recipeSpellID then
             local info = sc(C_TradeSkillUI.GetRecipeInfo, rec.recipeSpellID)
-            if info then
-                rec.learned = info.learned
+            if info and info.learned ~= nil then
+                rec.learned = info.learned and true or false
                 rec.isUnavailable = (info.learned == false)
-                if info.learned then Store.MarkLearnedBy(rec.recipeSpellID) end
                 local ser = Store.GetSavedRecipe(rec.recipeSpellID)
                 if ser then
-                    ser.learnedBy = ser.learnedBy or {}
-                    if info.learned then ser.learnedBy[player] = true end
+                    if type(ser.learnedBy) ~= "table" then ser.learnedBy = {} end
+                    if info.learned then
+                        ser.learnedBy[player] = true
+                        ser.learned = true
+                    else
+                        ser.learnedBy[player] = false
+                        ser.learned = HasAnyLearner(ser.learnedBy) and true or false
+                    end
+                    rec.learnedBy = ser.learnedBy
+                else
+                    if type(rec.learnedBy) ~= "table" then rec.learnedBy = {} end
                 end
             end
         end

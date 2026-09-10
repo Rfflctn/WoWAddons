@@ -16,9 +16,11 @@ function UI.GetWoodDisplayName(rec)
     return rec.woodName or (rec.woodItemID and ("#" .. rec.woodItemID)) or "?"
 end
 
+-- Знает ли рецепт ХОТЬ КТО-ТО на аккаунте (явные true в learnedBy;
+-- false-записи "проверено, не знает" игнорируем)
 function UI.HasOtherLearners(rec)
     if type(rec.learnedBy) ~= "table" then return false end
-    for _ in pairs(rec.learnedBy) do return true end
+    for _, v in pairs(rec.learnedBy) do if v == true then return true end end
     return false
 end
 

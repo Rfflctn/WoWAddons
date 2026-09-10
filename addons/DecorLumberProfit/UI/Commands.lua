@@ -136,6 +136,10 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         if DecorLumberProfitCore and DecorLumberProfitCore.MarkLearnedBy then
             DecorLumberProfitCore:MarkLearnedBy(recipeID)
         end
+        -- Событие несёт recipeID (не recipeSpellID-ключ базы), поэтому точечная
+        -- пометка выше может не попасть; сверяем известные рецепты с живым API
+        -- и сразу сохраняем флаги в DB (переживёт /reload без ручного скана)
+        pcall(function() DecorLumberProfitCore:RefreshLearnedFlags(UI._currentRecipes) end)
         if UI._mainFrame and UI._mainFrame:IsShown() then
             C_Timer.After(0.5, function() UI.RebuildRecipeList(false) end)
         end

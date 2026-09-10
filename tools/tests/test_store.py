@@ -119,3 +119,53 @@ CAP_AFTER = DecorLumberProfitStore.SavedRecipeCount()
     check('cap after 1000', 'CAP_AFTER', '1000')
     check('cap kept untimestamped', 'tostring(DecorLumberProfitDB.recipes[700001] ~= nil)', 'true')
     check('cap dropped oldest stamped', 'tostring(DecorLumberProfitDB.recipes[900001] == nil)', 'true')
+
+    # ---- per-character learned: скан одного перса не затирает флаг другого ----
+    exec_(r'''
+DecorLumberProfitDB.recipes = {}
+DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424242, name="R", learned=true })
+''')
+    check('save learned=true persists', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
+    check('save marks self learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+    exec_(r'''
+OLD_UNITNAME = UnitName
+UnitName = function() return "Alt" end
+DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424242, name="R", learned=false })
+UnitName = OLD_UNITNAME
+''')
+    check('alt scan keeps anyone-learned', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
+    check('alt recorded unlearned', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Alt)', 'false')
+    check('self still learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+    exec_(r'''
+LOAD_ME = DecorLumberProfitStore.LoadSavedRecipes()
+UnitName = function() return "Alt" end
+LOAD_ALT = DecorLumberProfitStore.LoadSavedRecipes()
+UnitName = OLD_UNITNAME
+''')
+    check('load restores self learned', 'tostring(LOAD_ME[1].learned)', 'true')
+    check('load restores alt unlearned', 'tostring(LOAD_ALT[1].learned)', 'false')
+    exec_(r'''
+DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424242, name="R" })
+''')
+    check('nil learned does not wipe', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
+    check('nil learned keeps learners', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+
+    # ---- RefreshLearnedFlags сохраняет оба направления в DB ----
+    exec_(r'''
+OLD_GETINFO = C_TradeSkillUI.GetRecipeInfo
+UnitName = function() return "Alt" end
+C_TradeSkillUI.GetRecipeInfo = function(id) return { learned = false } end
+RL_ALT = { { recipeSpellID = 424242, learned = true } }
+DecorLumberProfitStore.RefreshLearnedFlags(RL_ALT)
+UnitName = OLD_UNITNAME
+C_TradeSkillUI.GetRecipeInfo = OLD_GETINFO
+''')
+    check('refresh persists unlearned in-memory', 'tostring(RL_ALT[1].learned)', 'false')
+    check('refresh records alt unlearned', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Alt)', 'false')
+    check('refresh keeps anyone-learned', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
+
+    # ---- HasOtherLearners игнорирует false-записи ----
+    check('other learners ignores false',
+          'tostring(DecorLumberProfitUI.HasOtherLearners({ learnedBy = { Alt = false } }))', 'false')
+    check('other learners sees true',
+          'tostring(DecorLumberProfitUI.HasOtherLearners({ learnedBy = { Alt = false, Tester = true } }))', 'true')
