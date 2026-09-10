@@ -13,7 +13,8 @@ function(name, code)
 end
 ''')
 ok = True
-for f in sorted(glob.glob(str(ADDON / "*.lua"))):
+# Recursive: covers Services/, UI/, Data/, Util/ after the split (Этап 0.1).
+for f in sorted(glob.glob(str(ADDON / "**" / "*.lua"), recursive=True)):
     src = open(f, encoding='utf-8').read()
     okf, err = check(f, src)
     if okf:

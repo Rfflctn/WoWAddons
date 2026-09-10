@@ -70,7 +70,18 @@ def load(path):
     ok = lua.eval('function() local c, e = load(SRC, "@' + path.replace('\\','/') + '") if not c then error(e) end c() return true end')()
     return ok
 
-for f in ['Locales.lua', 'Config.lua', 'Core.lua', 'Auction.lua', 'UI.lua']:
+# NOTE: load order is read from the .toc (same as run_tests.py). Do not hardcode:
+# files moved (Etap 2: Data/Wood.lua, Init.lua, Services/Diag.lua) must load too.
+def toc_lua_files():
+    toc = io.open(ADDON + '\\DecorLumberProfit.toc', encoding='utf-8').read()
+    files = []
+    for line in toc.splitlines():
+        line = line.strip()
+        if line and not line.startswith('#') and line.lower().endswith('.lua'):
+            files.append(line.replace('/', '\\'))
+    return files
+
+for f in toc_lua_files():
     load(ADDON + '\\' + f)
     print('loaded:', f)
 

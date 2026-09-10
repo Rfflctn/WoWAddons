@@ -1,72 +1,13 @@
 -- Config.lua | DecorLumberProfit | Retail 12.1.0 Midnight
--- Центральная конфигурация, itemID и константы.
+-- Тюнинг аддона (аукцион/UI). Данные древесины — в Data/Wood.lua (грузится раньше).
+-- НЕ пересоздавать таблицу: Wood.lua уже наполнил WOOD_* поля.
 
-local ADDON_NAME = "DecorLumberProfit"
+DecorLumberProfitConfig = DecorLumberProfitConfig or {}
 
-DecorLumberProfitConfig = {}
-
-DecorLumberProfitConfig.WOOD_ITEM_IDS = {
-    245586, -- Ironwood (Древесина железного дерева, Kalimdor/Eastern Kingdoms)
-    242691, -- Olemba (Олембовая древесина, Outland)
-    251762, -- Coldwind (Морозная древесина, Northrend)
-    251764, -- Ashwood (Ясеневая древесина, Cataclysm)
-    251763, -- Bamboo (Бамбуковая древесина, Pandaria)
-    251766, -- Shadowmoon (Призрачнолунная древесина, Draenor)
-    251767, -- Fel-Touched (Оскверненная древесина, Legion/Broken Isles+Argus)
-    251768, -- Darkpine (Темнососновая древесина, BfA Zuldazar/Kul Tiras)
-    251772, -- Arden (Арденвельдская древесина, Shadowlands)
-    251773, -- Dragonpine (Древесина драконьих сосен, Dragon Isles)
-    248012, -- Dornic Fir (Древесина дорнской ели, Khaz Algar)
-    256963, -- Thalassian (Талассийская древесина, Quel'Thalas/Harandar)
-}
-
--- Set для быстрого lookup: WOOD_IDS_SET[itemID]=true
-DecorLumberProfitConfig.WOOD_IDS_SET = {}
-for _, id in ipairs(DecorLumberProfitConfig.WOOD_ITEM_IDS) do
-    DecorLumberProfitConfig.WOOD_IDS_SET[id] = true
-end
--- обратная совместимость: WOOD_ITEM_ID уже как set
-DecorLumberProfitConfig.WOOD_ITEM_ID = DecorLumberProfitConfig.WOOD_ITEM_ID or 256963 -- Thalassian (главная древесина по умолчанию)
-DecorLumberProfitConfig.WOOD_IDS_SET[DecorLumberProfitConfig.WOOD_ITEM_ID] = true
-
--- Варианты названий для поиска (ruRU / enUS). Используются как fallback по имени.
-DecorLumberProfitConfig.WOOD_NAMES = {
-    -- Thalassian
-    "Талассийская древесина",
-    "Thalassian Lumber",
-    -- Ironwood
-    "Древесина железного дерева",
-    "Ironwood Lumber",
-    -- Olemba
-    "Олембовая древесина",
-    "Olemba Lumber",
-    -- Coldwind / Морозная
-    "Морозная древесина",
-    "Coldwind Lumber",
-    -- Ashwood / Ясеневая
-    "Ясеневая древесина",
-    "Ashwood Lumber",
-    -- Bamboo
-    "Бамбуковая древесина",
-    "Bamboo Lumber",
-    -- Shadowmoon / Призрачнолунная
-    "Призрачнолунная древесина",
-    "Shadowmoon Lumber",
-    -- Fel-Touched / Оскверненная
-    "Оскверненная древесина",
-    "Fel-Touched Lumber",
-    -- Darkpine / Темнососновая
-    "Темнососновая древесина",
-    "Darkpine Lumber",
-    -- Arden
-    "Арденвельдская древесина",
-    "Arden Lumber",
-    -- Dragonpine
-    "Древесина драконьих сосен",
-    "Dragonpine Lumber",
-    -- Dornic Fir
-    "Древесина дорнской ели",
-    "Dornic Fir Lumber",
+-- Настройки сканирования рецептов
+DecorLumberProfitConfig.SCAN = {
+    ENABLE_BRUTEFORCE = true, -- перебор professionID как последний шанс (Recipes.TryGetAll / fallback TryGetActive)
+    MAX_RESULTS = 500,        -- кап результатов Scan (меняется через /dlp debug set maxscan)
 }
 
 -- Настройки аукциона

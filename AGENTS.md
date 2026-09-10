@@ -4,7 +4,7 @@
 > затем этот файл (правила и детали маршрутизации). `PROJECT-INDEX.md` — обзор, этот файл — источник истины при расхождениях.
 
 Проект: база знаний по разработке WoW-аддонов (Retail, патч 12.1.0 / Midnight)
-+ код аддона в `addons/DecorLumberProfit/` (TOC + 5×Lua).
++ код аддона в `addons/DecorLumberProfit/` (TOC + 20×Lua: Init, Config, Core, UI, Locales + Data/Wood + Services/ItemInfo, Recipes, Store, Economy, Prices, Diag + Util/Money + UI/Status, Tooltip, TableView, Actions, MainFrame, Popups, Commands; `DecorLumberProfitAuction` — legacy-алиас Prices).
 
 ## Карта источников (по убыванию приоритета)
 
@@ -44,6 +44,7 @@
 4. `wiki-lua/pages/api/` неполон (скрейп оборвался на ~125/6198) — если функции там нет,
    это НЕ значит, что её нет в игре; источник истины — `wiki-lua/blizzard_api_doc/`.
 5. Ответы по API сверять с `Environment`/патчем: документы соответствуют Retail 12.1.0.
+6. Новые методы фреймов/виджетов (`Frame:*`, `GameTooltip:*`, скрипт-хендлеры) — ТОЛЬКО после проверки существования: `C_*` через `tools/find-api.ps1`, виджеты — grep по `wiki-lua/15_widget_api.md` / `16_widget_script_handlers.md`. Midnight удаляет API без обратной совместимости (прецедент 2.0.0: `SetMinResize`/`SetMaxResize` → `SetResizeBounds`; lupa-стабы маскируют такие баги — любой метод существует в тестах). Критичные вызовы при создании окна — за гардами (`if f.Method then`), чтобы окно открывалось при любых изменениях API.
 
 ## Поддерживающие скрипты
 

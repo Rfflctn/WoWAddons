@@ -1,0 +1,253 @@
+-- Services/Store.lua | DecorLumberProfit | Retail 12.1.0
+-- Персистентность (Этап 5): account-wide база рецептов, knownRecipes, миграции схемы.
+-- priceCache владеет Prices (Auction.lua), settings — UI; сюда не тянем (см. план).
+-- Все функции — через точку (без self). Core держит тонкие :-врапперы.
+-- WoW Lua 5.1: no goto, no //, no bitwise ops. No WoW calls at top level.
+
+DecorLumberProfitStore = {}
+local Store = DecorLumberProfitStore
+
+Store.RECIPE_CAP = 1000 -- кап таблицы recipes (EnforceCap режет только timestamped, сверх капа — самые старые)
+
+local function Now()
+    if _G.time then
+        local ok, t = pcall(_G.time)
+        if ok and type(t) == "number" then return t end
+    end
+    return 0
+end
+
+local function CountTable(t)
+    local Addon = _G.DecorLumberProfit
+    if Addon and Addon.CountTable then return Addon.CountTable(t) end
+    if type(t) ~= "table" then return 0 end
+    local c = 0
+    for _ in pairs(t) do c = c + 1 end
+    return c
+end
+
+-- ==== Миграции ====
+
+--Adopt legacy SavedVariables names (v1.4.0 rename LumberProfit/ThalassianWood -> DecorLumberProfit).
+local function AdoptLegacyNames()
+    if DecorLumberProfitDB == nil and _G.LumberProfitDB ~= nil then DecorLumberProfitDB = _G.LumberProfitDB end
+    if DecorLumberProfitDB == nil and _G.ThalassianWoodDB ~= nil then DecorLumberProfitDB = _G.ThalassianWoodDB end
+    if DecorLumberProfitCharDB == nil and _G.LumberProfitCharDB ~= nil then DecorLumberProfitCharDB = _G.LumberProfitCharDB end
+    if DecorLumberProfitCharDB == nil and _G.ThalassianWoodCharDB ~= nil then DecorLumberProfitCharDB = _G.ThalassianWoodCharDB end
+end
+
+local function EnsureTables()
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
+    DecorLumberProfitDB.knownRecipes = DecorLumberProfitDB.knownRecipes or {}
+    DecorLumberProfitDB.recipes = DecorLumberProfitDB.recipes or {}
+    DecorLumberProfitDB.settings = DecorLumberProfitDB.settings or {}
+    DecorLumberProfitCharDB = DecorLumberProfitCharDB or {}
+    DecorLumberProfitCharDB.seenRecipes = DecorLumberProfitCharDB.seenRecipes or {}
+end
+
+-- Режет таблицу сверх капа: только записи С меткой savedAt (самые старые первыми);
+-- без метки (дедовские сейвы) не трогаем.
+function Store.EnforceCap()
+    local db = _G.DecorLumberProfitDB
+    if not (db and db.recipes) then return 0 end
+    local total = CountTable(db.recipes)
+    if total <= Store.RECIPE_CAP then return 0 end
+    local stamped = {}
+    for spellID, ser in pairs(db.recipes) do
+        if type(ser) == "table" and type(ser.savedAt) == "number" then
+            stamped[#stamped + 1] = { spellID = spellID, at = ser.savedAt }
+        end
+    end
+    table.sort(stamped, function(a, b) return a.at < b.at end)
+    local drop = total - Store.RECIPE_CAP
+    local removed = 0
+    for i = 1, math.min(drop, #stamped) do
+        db.recipes[stamped[i].spellID] = nil
+        removed = removed + 1
+    end
+    return removed
+end
+
+-- Точка входа при ADDON_LOADED (вызывает UI): adopt -> ensure -> migrate -> stamp.
+function Store.Upgrade()
+    AdoptLegacyNames()
+    EnsureTables()
+    local Addon = _G.DecorLumberProfit
+    local target = (Addon and Addon.DB_SCHEMA) or 1
+    local schema = DecorLumberProfitDB.schemaVersion or 0
+    if schema < 1 then
+        Store.EnforceCap()
+    end
+    -- будущие схемы: if schema < 2 then ... end (по нарастающей)
+    -- Применяем сохранённые настройки сканирования поверх Config (переживают /reload)
+    DecorLumberProfitConfig = DecorLumberProfitConfig or {}
+    local sc = DecorLumberProfitConfig.SCAN or {}
+    local saved = DecorLumberProfitDB.settings.scan or {}
+    if saved.bruteforce ~= nil then sc.ENABLE_BRUTEFORCE = saved.bruteforce end
+    if type(saved.maxscan) == "number" then sc.MAX_RESULTS = saved.maxscan end
+    DecorLumberProfitConfig.SCAN = sc
+    DecorLumberProfitDB.schemaVersion = target
+    _G.DecorLumberProfitDB = DecorLumberProfitDB
+    _G.DecorLumberProfitCharDB = DecorLumberProfitCharDB
+    return DecorLumberProfitDB
+end
+
+-- ==== knownRecipes / seenRecipes ====
+
+function Store.RememberRecipe(recipeID, recipeLevel)
+    if not recipeID then return end
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.knownRecipes = DecorLumberProfitDB.knownRecipes or {}
+    DecorLumberProfitDB.knownRecipes[recipeID] = { level = recipeLevel, time = Now() }
+    DecorLumberProfitCharDB = DecorLumberProfitCharDB or {}
+    DecorLumberProfitCharDB.seenRecipes = DecorLumberProfitCharDB.seenRecipes or {}
+    DecorLumberProfitCharDB.seenRecipes[recipeID] = true
+end
+
+-- ==== Таблица recipes (account-wide snapshot'ы) ====
+
+local function EnsureRecipes()
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.recipes = DecorLumberProfitDB.recipes or {}
+    return DecorLumberProfitDB.recipes
+end
+
+function Store.SerializeRecipe(rec)
+    if not rec or not rec.recipeSpellID then return nil end
+    local reagents = {}
+    for i, r in ipairs(rec.reagents or {}) do
+        reagents[i] = { itemID = r.itemID, quantity = r.quantity, required = r.required,
+                        slotIndex = r.slotIndex, reagentType = r.reagentType, isWood = r.isWood }
+    end
+    return {
+        recipeSpellID = rec.recipeSpellID,
+        name = rec.name,
+        profession = rec.profession,
+        outputItemID = rec.outputItemID,
+        outputQty = rec.outputQty, outputMin = rec.outputMin, outputMax = rec.outputMax,
+        icon = rec.icon,
+        woodQty = rec.woodQty, woodItemID = rec.woodItemID, woodName = rec.woodName,
+        reagents = reagents,
+        learned = rec.learned,
+    }
+end
+
+-- Сохраняет snapshot рецепта в общую базу (не перетирая learned-флаг других персонажей)
+function Store.SaveRecipe(rec)
+    if not rec or not rec.recipeSpellID then return end
+    local db = EnsureRecipes()
+    local ser = Store.SerializeRecipe(rec)
+    local existing = db[rec.recipeSpellID]
+    if existing then
+        ser.learnedBy = existing.learnedBy or {}
+        ser.savedAt = existing.savedAt -- возраст записи не омолаживаем апдейтами
+        -- обновляем только если пришли более полные данные (есть reagents)
+        if not (ser.reagents and #ser.reagents > 0) and existing.reagents and #existing.reagents > 0 then
+            ser.reagents = existing.reagents
+        end
+    else
+        ser.learnedBy = {}
+        ser.savedAt = Now()
+    end
+    ser.updatedAt = Now()
+    db[rec.recipeSpellID] = ser
+    return db[rec.recipeSpellID]
+end
+
+-- Отмечает, что рецепт изучен текущим персонажем
+function Store.MarkLearnedBy(spellID)
+    if not spellID then return end
+    local db = EnsureRecipes()
+    local ser = db[spellID]
+    if not ser then return end
+    ser.learnedBy = ser.learnedBy or {}
+    ser.learnedBy[_G.UnitName and UnitName("player") or "player"] = true
+    ser.learned = true
+end
+
+-- Загружает все сохранённые рецепты (общие для аккаунта), ре-валидируя привязку выхода
+function Store.LoadSavedRecipes()
+    local out = {}
+    if not (DecorLumberProfitDB and DecorLumberProfitDB.recipes) then return out end
+    local ItemInfo = _G.DecorLumberProfitItemInfo
+    local function unsell(itemID)
+        if ItemInfo and ItemInfo.IsUnsellable then return ItemInfo.IsUnsellable(itemID) end
+        return false
+    end
+    for spellID, ser in pairs(DecorLumberProfitDB.recipes) do
+        if type(ser) == "table" and ser.recipeSpellID then
+            local rec = {}
+            for k, v in pairs(ser) do rec[k] = v end
+            local u = nil
+            if rec.outputItemID then u = unsell(rec.outputItemID) end
+            if u == true then
+                DecorLumberProfitDB.recipes[spellID] = nil -- чистим базу от непродаваемых
+            elseif u == nil and rec.outputItemID then
+                rec.isUnavailable = (rec.learned == false)
+                if ItemInfo and ItemInfo.PendingAdd then
+                    ItemInfo.PendingAdd(spellID, rec) -- bind неизвестен — ждём догрузки, в таблицу не пускаем
+                end
+            else
+                rec.isUnavailable = (rec.learned == false)
+                table.insert(out, rec)
+            end
+        end
+    end
+    return out
+end
+
+function Store.GetSavedRecipe(spellID)
+    if not (DecorLumberProfitDB and DecorLumberProfitDB.recipes) then return nil end
+    return DecorLumberProfitDB.recipes[spellID]
+end
+
+function Store.ClearSavedRecipes()
+    if DecorLumberProfitDB then DecorLumberProfitDB.recipes = {} end
+end
+
+function Store.SavedRecipeCount()
+    local db = _G.DecorLumberProfitDB
+    if db and db.recipes then return CountTable(db.recipes) end
+    return 0
+end
+
+-- Пересчитывает learned для загруженных рецептов по живому API (для текущего персонажа)
+function Store.RefreshLearnedFlags(list)
+    if not C_TradeSkillUI or not C_TradeSkillUI.GetRecipeInfo then return end
+    local Addon = _G.DecorLumberProfit
+    local function sc(func, ...)
+        if Addon and Addon.SafeCall then return Addon.SafeCall(func, ...) end
+        return nil
+    end
+    local player = (_G.UnitName and UnitName("player")) or "player"
+    for _, rec in ipairs(list) do
+        if rec.recipeSpellID then
+            local info = sc(C_TradeSkillUI.GetRecipeInfo, rec.recipeSpellID)
+            if info then
+                rec.learned = info.learned
+                rec.isUnavailable = (info.learned == false)
+                if info.learned then Store.MarkLearnedBy(rec.recipeSpellID) end
+                local ser = Store.GetSavedRecipe(rec.recipeSpellID)
+                if ser then
+                    ser.learnedBy = ser.learnedBy or {}
+                    if info.learned then ser.learnedBy[player] = true end
+                end
+            end
+        end
+    end
+end
+
+function Store.HealthCheck()
+    local db = _G.DecorLumberProfitDB
+    local ch = _G.DecorLumberProfitCharDB
+    return {
+        ok = db ~= nil,
+        schema = db and (db.schemaVersion or 0) or 0,
+        recipes = db and db.recipes and CountTable(db.recipes) or 0,
+        known = db and db.knownRecipes and CountTable(db.knownRecipes) or 0,
+        seen = ch and ch.seenRecipes and CountTable(ch.seenRecipes) or 0,
+    }
+end
+
+_G.DecorLumberProfitStore = Store

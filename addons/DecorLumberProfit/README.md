@@ -33,6 +33,9 @@ Retail 12.1.0 / Midnight. Аддон считает, выгодно ли кра�
 /dlp locale auto — язык по локали клиента (по умолчанию)
 /lp, /twc, /thalwood — легаси-алиасы (остались от старых имён)
 /древесина      — алиас RU
+/dlp debug      — статус подсистем (где сломалось — видно за 5 секунд)
+/dlp debug selftest — встроенные проверки без аукциона и профессий
+/dlp bug        — блок для копипасты в issue
 ```
 
 1. Откройте окно профессии (любой) — аддон кэширует рецепты.
@@ -93,16 +96,30 @@ profit = outputTotal - totalCost
 
 ## Файлы
 
-- `DecorLumberProfit.toc` — метаданные, `Interface: 120100`, `SavedVariables`
+- `DecorLumberProfit.toc` — метаданные, `Interface: 120100`, `SavedVariables`, порядок загрузки (Locales → Init → Data/Wood → Config → Services/* → Util/Money → Core → UI/* → Diag)
 - `Locales.lua` — все тексты аддона (`DecorLumberProfitLocale.enUS` / `.ruRU`); доступ через `L["KEY"]` и `TL("KEY", ...)`, ключ `auto`/ru/en в `DecorLumberProfitDB.settings.locale`
-- `Config.lua` — константы и ID древесины
-- `Core.lua` — поиск рецептов и расчёты (`C_TradeSkillUI.*`, `C_Item.GetItemInfo`)
-- `Auction.lua` — очередь аукциона (`C_AuctionHouse.*`, события throttle)
-- `UI.lua` — окно (сплошной тёмный фон + рамка `UI-DialogBox-Border`) и таблица (`CreateFrame`, `BackdropTemplate`, `UICheckButtonTemplate`, `GameTooltip`); цены форматирует `DecorLumberProfitAuction.FormatMoney` (золото/серебро/медь с иконками)
+- `Init.lua` — неймспейс `DecorLumberProfit`: `VERSION`, `DB_SCHEMA`, `SafeCall`/`CountTable`/`Log`
+- `Data/Wood.lua` — владелец данных древесины (12 ID + set + имена); наполняет `Config.WOOD_*`
+- `Config.lua` — тюнинг AUCTION/UI/SCAN + `API_CHECKLIST`
+- `Services/ItemInfo.lua` — кэш имён/bindType (tri-state), отложенные рецепты, `PruneUnsellable`
+- `Services/Recipes.lua` — перечисление рецептов, схемы, unified `Scan({scope})`, `DebugActive/DebugSpell`
+- `Services/Store.lua` — персистентность (`Upgrade`, `SaveRecipe` с `savedAt/updatedAt`, `EnforceCap` 1000)
+- `Services/Economy.lua` — чистая формула `CalculateRecipeEconomy` (не менять!)
+- `Util/Money.lua` — `FormatMoney` (золото/серебро/медь с иконками)
+- `Services/Prices.lua` — очередь аукциона (`C_AuctionHouse.*`, события throttle, батч-таймер, coalesce UI-обновлений, `GetQueueInfo`); `DecorLumberProfitAuction` — legacy-алиас
+- `Core.lua` — только тонкие `:`-врапперы над Services/* (для совместимости `/dump` и UI)
+- `UI.lua` — неймспейс + общее состояние таблицы (`UI._x`)
+- `UI/TableView.lua` — колонки, сортировка, пул строк с виртуализацией (`VisibleRange`), `RefreshTable`
+- `UI/MainFrame.lua` — окно (ресайз с перераскладкой колонок, health-dot, шапка, скролл)
+- `UI/Actions.lua` — скан, загрузка из DB, цены, очистка
+- `UI/Commands.lua` — slash `/dlp` и события клиента
+- `UI/Status.lua` — статус-строка (+health-dot), `UI/Tooltip.lua` — тултипы строк (item-ссылки), `UI/Popups.lua` — StaticPopup
+- `Services/Diag.lua` — диагностика: `Diag.Log`, `lastError`, `/dlp debug status|selftest|verbose`, `/dlp bug`
 - `README.md` — эта документация
 
 ## Отладка
 
+- `/dlp debug` — статус подсистем, `/dlp debug selftest` — проверки в игре, `/dlp bug` — бандл для issue
 - `/dump DecorLumberProfitDB` — кэш цен и известных рецептов
 - `/dump DecorLumberProfitCore:FindWoodRecipes()` — ручной тест поиска
 - Если таблица пуста — откройте книгу профессий, изучите хотя бы один рецепт с древесиной, перезапустите скан.

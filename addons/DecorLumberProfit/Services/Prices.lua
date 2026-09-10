@@ -1,8 +1,10 @@
--- Auction.lua | DecorLumberProfit | Retail 12.1.0
--- Получение цен с аукциона через C_AuctionHouse (commodity + item), throttle-очередь.
+-- Services/Prices.lua | DecorLumberProfit | Retail 12.1.0
+-- Цены аукциона через C_AuctionHouse (commodity + item), throttle-очередь.
+-- (Этап 7: переименование Auction.lua; FormatMoney — в Util/Money.lua.)
+-- Соглашение: функции через точку (без self), кроме исторических :-методов — не менять.
 
-DecorLumberProfitAuction = {}
-local Auction = DecorLumberProfitAuction
+DecorLumberProfitPrices = {}
+local Auction = DecorLumberProfitPrices
 
 local priceCache = {} -- [itemID] = { price=copper, timestamp=time(), source=..., noauction? }
 local pending = {}    -- [itemID] = true (ожидает ответа)
@@ -14,6 +16,9 @@ local lastQueryTime = 0
 local attempts = {}   -- [itemID] = число попыток запроса
 local droppedIDs = {} -- [itemID] = true (запрос отброшен троттлом — попытка не считается)
 local lastSentItemID = nil
+local overflowHead = 1 -- голова overflow (Этап 7: O(1) вместо table.remove(overflow, 1))
+local sentAt = {}     -- [itemID] = GetTime() отправки (Этап 7: батч-sweep вместо N C_Timer.After)
+local stats = { requested = 0, resolved = 0 } -- прогресс очереди для UI/status (Этап 7)
 local MAX_ATTEMPTS = 3
 local RESOLVE_DELAY = 1.5
 
@@ -42,33 +47,11 @@ local function IsExpired(entry, ttl)
     return entry.timestamp ~= nil and (Now() - entry.timestamp) > ttl
 end
 
--- ==== Форматирование денег ====
-local MONEY_ICON = {
-    g = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t",
-    s = "|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:2:0|t",
-    c = "|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:2:0|t",
-}
-
--- Компактно: >1g — «12g 34s», <1g — «56s 78c», <1s — «9c». Знак — текстом, цвет задаёт вызывающий.
+-- ==== Форматирование денег — в Util/Money.lua (Этап 7). Алиас для совместимости. ====
 function Auction.FormatMoney(copper)
-    if copper == nil then return "—" end
-    copper = math.floor(tonumber(copper) or 0)
-    local sign = ""
-    if copper < 0 then sign = "-"; copper = -copper end
-    local g = math.floor(copper / 10000)
-    local s = math.floor((copper % 10000) / 100)
-    local c = copper % 100
-    local parts = {}
-    if g > 0 then
-        parts[#parts + 1] = tostring(g) .. MONEY_ICON.g
-        if s > 0 then parts[#parts + 1] = tostring(s) .. MONEY_ICON.s end
-    elseif s > 0 then
-        parts[#parts + 1] = tostring(s) .. MONEY_ICON.s
-        if c > 0 then parts[#parts + 1] = tostring(c) .. MONEY_ICON.c end
-    else
-        parts[#parts + 1] = tostring(c) .. MONEY_ICON.c
-    end
-    return sign .. table.concat(parts, " ")
+    local M = _G.DecorLumberProfitMoney
+    if M and M.FormatMoney then return M.FormatMoney(copper) end
+    return "—"
 end
 
 -- ==== Кэш цен ====
@@ -206,26 +189,36 @@ function Auction.Enqueue(itemIDs)
     Auction.ProcessQueue()
 end
 
+local function OverflowSize()
+    return #overflow - overflowHead + 1
+end
+
 -- Переливает overflow в очередь, выкидывая предметы, цена для которых уже не нужна.
 -- Инвариант: queuedSet[id]=true ⇔ id лежит в queue или overflow.
 local function PopFromOverflow()
-    while #queue < GetQueueCap() and #overflow > 0 do
-        local id = table.remove(overflow, 1)
+    while #queue < GetQueueCap() and overflowHead <= #overflow do
+        local id = overflow[overflowHead]
+        overflow[overflowHead] = nil
+        overflowHead = overflowHead + 1
         if not Auction.HasFreshPrice(id) and not Auction.IsPending(id) then
             table.insert(queue, id)
         else
             queuedSet[id] = nil
         end
     end
+    if overflowHead > #overflow then overflow, overflowHead = {}, 1 end -- голова убежала: сброс массива
 end
 
 function Auction.ClearQueue()
     queue = {}
     overflow = {}
+    overflowHead = 1
     queuedSet = {}
     pending = {}
+    sentAt = {}
     attempts = {}
     droppedIDs = {}
+    stats = { requested = 0, resolved = 0 }
     lastSentItemID = nil
     isProcessing = false
     if FRAME then FRAME:SetScript("OnUpdate", nil) end
@@ -234,10 +227,13 @@ end
 -- Завершение обработки одного предмета: цена / пустой лот / ретрай
 local function ResolveItem(itemID)
     if type(itemID) ~= "number" then return end
+    local wasPending = pending[itemID]
     local p = Auction.TryUpdateFromCache(itemID)
     pending[itemID] = nil
+    sentAt[itemID] = nil
     if p then
         attempts[itemID] = nil
+        if wasPending then stats.resolved = stats.resolved + 1 end
         return
     end
     -- Полные результаты по commodity и ноль лотов = предмета нет на аукционе -> кэшируем как "нет аукционов"
@@ -246,6 +242,7 @@ local function ResolveItem(itemID)
         if ok and full then
             CacheEntry(itemID, { noauction = true, timestamp = Now(), source = "commodity-empty" })
             attempts[itemID] = nil
+            if wasPending then stats.resolved = stats.resolved + 1 end
             return
         end
     end
@@ -274,6 +271,7 @@ function Auction.ProcessQueue()
     if isProcessing then return end
     PopFromOverflow()
     if #queue == 0 then return end
+    stats = { requested = 0, resolved = 0 } -- новый скан считается с нуля (Этап 7)
     if not FRAME then
         FRAME = CreateFrame("Frame", "DecorLumberProfitAuctionFrame")
     end
@@ -284,8 +282,8 @@ function Auction.ProcessQueue()
         if #queue == 0 then
             PopFromOverflow()
         end
-        -- Завершаем скан только когда и очередь, и pending пусты
-        if #queue == 0 and not next(pending) then
+        -- Завершаем скан только когда очередь, pending и sentAt пусты
+        if #queue == 0 and not next(pending) and not next(sentAt) then
             self:SetScript("OnUpdate", nil)
             isProcessing = false
             NotifyScanFinished()
@@ -293,6 +291,13 @@ function Auction.ProcessQueue()
         end
 
         local now = GetTime()
+        -- Батч-разрешение отправленных (Этап 7): один sweep вместо N C_Timer.After.
+        -- Удаление текущего ключа при обходе pairs безопасно; ResolveItem в sentAt не пишет.
+        for id, t0 in pairs(sentAt) do
+            if (now - t0) >= RESOLVE_DELAY then
+                ResolveItem(id)
+            end
+        end
         if (now - lastQueryTime) < GetDelay() then return end
 
         -- Проверяем throttle
@@ -316,7 +321,7 @@ function Auction.ProcessQueue()
         end
         if not itemID then
             PopFromOverflow()
-            if #queue == 0 and not next(pending) then
+            if #queue == 0 and not next(pending) and not next(sentAt) then
                 self:SetScript("OnUpdate", nil)
                 isProcessing = false
                 NotifyScanFinished()
@@ -364,13 +369,33 @@ function Auction.ProcessQueue()
             end
         else
             lastSentItemID = itemID
-            -- Разрешаем предмет после предполагаемого ответа (цена / пустой лот / ретрай)
-            C_Timer.After(RESOLVE_DELAY, function()
-                ResolveItem(itemID)
-            end)
+            stats.requested = stats.requested + 1
+            -- Разрешение — батчем в sweep выше (Этап 7), без персонального таймера
+            sentAt[itemID] = GetTime()
         end
 
         lastQueryTime = GetTime()
+    end)
+end
+
+-- Снятие ожидания из всех структур (успех из события; считает прогресс один раз — см. ResolveItem)
+local function ClearPending(itemID)
+    if pending[itemID] then stats.resolved = stats.resolved + 1 end
+    pending[itemID] = nil
+    sentAt[itemID] = nil
+    attempts[itemID] = nil
+end
+
+-- Coalesce UI-обновлений (Этап 7): события АХ сыплются пачками, таблица — максимум ~3/сек
+local uiDirty = false
+local function NotifyPriceUpdate()
+    if uiDirty then return end
+    uiDirty = true
+    C_Timer.After(0.3, function()
+        uiDirty = false
+        if DecorLumberProfitUI and DecorLumberProfitUI.OnPriceUpdate then
+            DecorLumberProfitUI.OnPriceUpdate()
+        end
     end)
 end
 
@@ -390,28 +415,26 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
         if type(itemID) == "number" then
             Auction.TryUpdateFromCache(itemID)
             if priceCache[itemID] and priceCache[itemID].price then
-                pending[itemID] = nil
-                attempts[itemID] = nil
+                ClearPending(itemID)
             end
         else
             -- COMMODITY_SEARCH_RESULTS_RECEIVED без аргумента — пробуем обновить все pending commodity
             for id in pairs(pending) do Auction.TryUpdateFromCache(id) end
         end
-        if DecorLumberProfitUI and DecorLumberProfitUI.OnPriceUpdate then DecorLumberProfitUI.OnPriceUpdate() end
+        NotifyPriceUpdate()
     elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
         local itemKey = arg1
         if itemKey and itemKey.itemID then
             local itemID = itemKey.itemID
             local p = UpdatePriceFromItem(itemKey, itemID)
             if p then
-                pending[itemID] = nil
-                attempts[itemID] = nil
+                ClearPending(itemID)
             end
-            if DecorLumberProfitUI and DecorLumberProfitUI.OnPriceUpdate then DecorLumberProfitUI.OnPriceUpdate() end
+            NotifyPriceUpdate()
         end
     elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "EXTRA_BROWSE_INFO_RECEIVED" then
         for id in pairs(pending) do Auction.TryUpdateFromCache(id) end
-        if DecorLumberProfitUI and DecorLumberProfitUI.OnPriceUpdate then DecorLumberProfitUI.OnPriceUpdate() end
+        NotifyPriceUpdate()
     elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
         -- Продолжаем очередь
         lastQueryTime = 0
@@ -469,5 +492,26 @@ function Auction.RequestPrices(itemIDs)
     Auction.Enqueue(itemIDs)
 end
 
--- Глобальный доступ для отладки
+-- Интроспекция очереди для Diag (/dlp debug status). Этап 0.2, аддитивно.
+-- Этап 7: overflow через OverflowSize(), плюс прогресс requested/resolved.
+function Auction.GetQueueInfo()
+    local p, a, d = 0, 0, 0
+    for _ in pairs(pending) do p = p + 1 end
+    for _ in pairs(attempts) do a = a + 1 end
+    for _ in pairs(droppedIDs) do d = d + 1 end
+    return {
+        queue = #queue,
+        overflow = OverflowSize(),
+        pending = p,
+        attempts = a,
+        dropped = d,
+        lastSent = lastSentItemID,
+        processing = isProcessing,
+        requested = stats.requested,
+        resolved = stats.resolved,
+    }
+end
+
+-- Глобальный доступ для отладки + legacy-алиас (Этап 7: переименование Auction -> Prices)
+_G.DecorLumberProfitPrices = Auction
 _G.DecorLumberProfitAuction = Auction
