@@ -168,6 +168,21 @@ local function CreateMainFrame()
     chkHide:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UI.chkHide = chkHide
 
+    -- Кнопка «Столбцы» (футер, чтобы не теснить верхний тулбар): открывает панель с чекбоксами.
+    local btnColumns = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btnColumns:SetSize(110, 22)
+    btnColumns:SetPoint("BOTTOMLEFT", 14, 6)
+    btnColumns:SetText(L.BTN_COLUMNS)
+    UI.btnColumns = btnColumns
+    btnColumns:SetScript("OnClick", function() UI.ToggleColumnsPanel() end)
+    btnColumns:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(L.TIP_COLUMNS_TITLE)
+        GameTooltip:AddLine(L.TIP_COLUMNS_L1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    btnColumns:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     -- Статус
     local statusText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     statusText:SetPoint("TOPLEFT", 18, -62)
@@ -200,6 +215,7 @@ local function CreateMainFrame()
         learned = L.HEAD_LEARNED,
         wood = L.HEAD_WOOD,
         sellPrice = L.HEAD_SELL,
+        ahQty = L.HEAD_AHQTY,
         woodQty = L.HEAD_WOODQTY,
         maxWoodPrice = L.HEAD_MAXPRICE,
         profit = L.HEAD_PROFIT,
@@ -210,6 +226,7 @@ local function CreateMainFrame()
         learned = L.HINT_LEARNED,
         wood = L.HINT_WOOD,
         sellPrice = L.HINT_SELL,
+        ahQty = L.HINT_AHQTY,
         woodQty = L.HINT_WOODQTY,
         maxWoodPrice = L.HINT_MAXPRICE,
         profit = L.HINT_PROFIT,
@@ -274,25 +291,156 @@ local function CreateMainFrame()
     end)
 
     UI._mainFrame = f
+    -- Панель чекбоксов — после шапки, чтобы подписи совпадали с заголовками
+    UI.BuildColumnsPanel(f, btnColumns)
     return f
 end
 
 -- Перераскладка шапки под текущие ширины колонок (Этап 9: ресайз)
+-- Учитывает видимость (панель «Столбцы»): скрытые кнопки прячем, видимые сдвигаем влево.
 function UI.LayoutHeaderCells()
     if not UI.headerCells then return end
+    local byKey = {}
+    for _, cell in ipairs(UI.headerCells) do byKey[cell.key] = cell end
     local x = 0
-    for _, cell in ipairs(UI.headerCells) do
-        local w = UI.ColWidth(cell.key, 100)
-        if cell.btn then
-            cell.btn:SetSize(w, 20)
-            cell.btn:ClearAllPoints()
-            cell.btn:SetPoint("LEFT", x, 0)
+    for _, c in ipairs(UI.COLUMNS) do
+        local cell = byKey[c.key]
+        if cell then
+            if UI.IsColumnVisible and not UI.IsColumnVisible(c.key) then
+                if cell.btn and cell.btn.Hide then pcall(cell.btn.Hide, cell.btn) end
+            else
+                local w = UI.ColWidth(c.key, 100)
+                if cell.btn then
+                    if cell.btn.Show then pcall(cell.btn.Show, cell.btn) end
+                    cell.btn:SetSize(w, 20)
+                    cell.btn:ClearAllPoints()
+                    cell.btn:SetPoint("LEFT", x, 0)
+                end
+                x = x + w
+            end
         end
-        x = x + w
     end
-    if UI._headerFrame then UI._headerFrame:SetSize(x, 20) end
+    if UI._headerFrame then UI._headerFrame:SetSize(math.max(x, 1), 20) end
+    UI.UpdateHeaderArrows()
 end
 
+-- Панель «Столбцы»: чекбокс на каждую колонку + кнопка «Показать все».
+-- Создаётся один раз как child главного окна (прячется вместе с ним).
+function UI.BuildColumnsPanel(parent, anchorBtn)
+    if UI._columnsPanel then return UI._columnsPanel end
+    local panel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    if panel.SetBackdrop then
+        panel:SetBackdrop({
+            bgFile = "Interface\\DialogBox\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogBox\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+    end
+    if panel.SetFrameStrata then panel:SetFrameStrata("DIALOG") end
+    if panel.SetFrameLevel then panel:SetFrameLevel(50) end
+    local cols = UI.COLUMNS or {}
+    local rowH = 20
+    local padTop, padBottom = 28, 34
+    panel:SetSize(220, padTop + #cols * rowH + padBottom)
+    if anchorBtn then
+        panel:SetPoint("BOTTOMLEFT", anchorBtn, "TOPLEFT", 0, 4)
+    else
+        panel:SetPoint("BOTTOMLEFT", 14, 32)
+    end
+    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("TOPLEFT", 10, -8)
+    title:SetText(L.TIP_COLUMNS_TITLE)
+    if title.SetTextColor then title:SetTextColor(1, 0.82, 0) end
+    UI._colChecks = {}
+    local y = -padTop + 4
+    -- Подписи чекбоксов = тексты шапки (локализованы, единый источник — HEAD-ключи локалeй).
+    local colNames = {
+        recipe = L.HEAD_RECIPE,
+        prof = L.HEAD_PROF,
+        learned = L.HEAD_LEARNED,
+        wood = L.HEAD_WOOD,
+        sellPrice = L.HEAD_SELL,
+        ahQty = L.HEAD_AHQTY,
+        woodQty = L.HEAD_WOODQTY,
+        maxWoodPrice = L.HEAD_MAXPRICE,
+        profit = L.HEAD_PROFIT,
+    }
+    for _, c in ipairs(cols) do
+        local colKey = c.key
+        local chk = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        chk:SetSize(20, 20)
+        chk:SetPoint("TOPLEFT", 8, y)
+        -- Подпись: текст заголовка колонки (Midnight: Text может отсутствовать — фолбэк FontString)
+        local labelText = colNames[colKey] or colKey
+        if chk.Text then
+            chk.Text:ClearAllPoints()
+            chk.Text:SetPoint("LEFT", chk, "RIGHT", 2, 0)
+            chk.Text:SetWordWrap(false)
+            chk.Text:SetText(labelText)
+            if chk.Text.SetFontObject then chk.Text:SetFontObject("GameFontHighlightSmall") end
+        else
+            local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", chk, "RIGHT", 2, 0)
+            fs:SetWordWrap(false)
+            fs:SetText(labelText)
+            chk._label = fs
+        end
+        chk._colKey = colKey
+        chk:SetScript("OnClick", function(self)
+            local want = self:GetChecked() and true or false
+            -- SetColumnVisible сам откатит чекбокс через RefreshColumnsPanel при отказе
+            UI.SetColumnVisible(colKey, want)
+        end)
+        UI._colChecks[colKey] = chk
+        y = y - rowH
+    end
+    local btnAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    btnAll:SetSize(120, 20)
+    btnAll:SetPoint("BOTTOMLEFT", 10, 8)
+    btnAll:SetText(L.BTN_SHOW_ALL_COLUMNS)
+    btnAll:SetScript("OnClick", function() UI.ResetColumns() end)
+    panel:Hide()
+    UI._columnsPanel = panel
+    UI.RefreshColumnsPanel()
+    return panel
+end
+
+-- Синхронизирует галочки панели с UI._hiddenColumns (после toggle/reset/load).
+function UI.RefreshColumnsPanel()
+    if not UI._colChecks then return end
+    for key, chk in pairs(UI._colChecks) do
+        local vis = true
+        if UI.IsColumnVisible then vis = UI.IsColumnVisible(key) end
+        if chk.SetChecked then
+            -- SetChecked без срабатывания OnClick (сухой сеттер)
+            pcall(chk.SetChecked, chk, vis)
+        end
+    end
+end
+
+function UI.ToggleColumnsPanel()
+    local p = UI._columnsPanel
+    if not p then
+        if UI._mainFrame and UI.btnColumns then
+            p = UI.BuildColumnsPanel(UI._mainFrame, UI.btnColumns)
+        else
+            return
+        end
+    end
+    -- Show/Hide за гардами (Midnight-совместимость: окно обязано открыться при любом API)
+    local shown = false
+    if p.IsShown then
+        local ok, v = pcall(p.IsShown, p)
+        if ok then shown = v end
+    end
+    if shown then
+        if p.Hide then pcall(p.Hide, p) end
+    else
+        UI.RefreshColumnsPanel()
+        if p.Show then pcall(p.Show, p) end
+    end
+end
 -- Ресайз главного окна (Этап 9): масштаб колонок + снос пула строк + перерендер.
 -- Троттлинг: реагируем только на сдвиг ширины ≥20px (OnSizeChanged сыплет на каждый пиксель).
 function UI.OnMainFrameSizeChanged(w, h)

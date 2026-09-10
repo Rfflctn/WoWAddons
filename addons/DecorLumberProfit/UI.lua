@@ -28,5 +28,8 @@ UI._topMode = false
 UI._lastRowCount = nil
 UI.hideUnlearned = false
 UI._loadedFromDB = false
+UI._hiddenColumns = {} -- { [colKey] = true } — скрытые колонки (панель «Столбцы», персист в DB.settings)
+UI._columnsPanel = nil
+UI._colChecks = {}
 
 _G.DecorLumberProfitUI = UI

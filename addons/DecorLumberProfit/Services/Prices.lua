@@ -71,9 +71,40 @@ function Auction.GetCachedPrice(itemID)
     return entry.price, entry
 end
 
-function Auction.SetPrice(itemID, price, source)
+function Auction.SetPrice(itemID, price, source, qty, listings)
     if type(itemID) ~= "number" or type(price) ~= "number" then return end
-    CacheEntry(itemID, { price = price, timestamp = Now(), source = source or "unknown" })
+    local old = priceCache[itemID]
+    if qty == nil and old then qty = old.qty end
+    if listings == nil and old then listings = old.listings end
+    CacheEntry(itemID, { price = price, timestamp = Now(), source = source or "unknown", qty = qty, listings = listings })
+end
+
+-- Кол-во лотов/штук на аукционе (конкуренция). Делит TTL с ценой: пишется тем же
+-- ответом SendSearchQuery, отдельного запроса не требует.
+-- Возвращает qty (суммарно штук), listings (число лотов), entry. nil — ещё не сканировали.
+function Auction.GetCachedQuantity(itemID)
+    if type(itemID) ~= "number" then return nil end
+    local entry = priceCache[itemID]
+    if not entry then
+        local saved = DecorLumberProfitDB and DecorLumberProfitDB.priceCache and DecorLumberProfitDB.priceCache[itemID]
+        if saved then
+            if IsExpired(saved, GetTTL() * 2) then return nil end
+            priceCache[itemID] = saved
+            entry = saved
+        end
+    end
+    if not entry then return nil end
+    if entry.qty == nil and entry.listings == nil then return nil end
+    return entry.qty, entry.listings, entry
+end
+
+-- Удобный агрегат для таблицы/тултипа: цена + конкуренция одним вызовом.
+function Auction.GetAuctionInfo(itemID)
+    if type(itemID) ~= "number" then return nil end
+    local price, entry = Auction.GetCachedPrice(itemID)
+    local qty, listings = Auction.GetCachedQuantity(itemID)
+    if price == nil and qty == nil and listings == nil then return nil end
+    return { price = price, qty = qty, listings = listings, entry = entry }
 end
 
 function Auction.ClearPriceCache()
@@ -96,7 +127,36 @@ function Auction.HasFreshPrice(itemID)
     return (Now() - entry.timestamp) <= GetTTL()
 end
 
--- ==== Парсинг цены из результатов аукциона ====
+-- ==== Парсинг цены из результатов аукциона ===
+-- Безопасное чтение конкуренции: суммарно штук (totalQuantity) + число лотов (num results).
+-- Всё за гардами + pcall: в тестах/старых клиентах методов может не быть — тогда nil.
+local function SafeCommodityQuantity(itemID)
+    if not C_AuctionHouse or type(itemID) ~= "number" then return nil, nil end
+    local qty, num = nil, nil
+    if C_AuctionHouse.GetCommoditySearchResultsQuantity then
+        local ok, v = pcall(C_AuctionHouse.GetCommoditySearchResultsQuantity, itemID)
+        if ok and type(v) == "number" then qty = v end
+    end
+    if C_AuctionHouse.GetNumCommoditySearchResults then
+        local ok, v = pcall(C_AuctionHouse.GetNumCommoditySearchResults, itemID)
+        if ok and type(v) == "number" then num = v end
+    end
+    return qty, num
+end
+
+local function SafeItemQuantity(itemKey)
+    if not C_AuctionHouse or not itemKey then return nil, nil end
+    local qty, num = nil, nil
+    if C_AuctionHouse.GetItemSearchResultsQuantity then
+        local ok, v = pcall(C_AuctionHouse.GetItemSearchResultsQuantity, itemKey)
+        if ok and type(v) == "number" then qty = v end
+    end
+    if C_AuctionHouse.GetNumItemSearchResults then
+        local ok, v = pcall(C_AuctionHouse.GetNumItemSearchResults, itemKey)
+        if ok and type(v) == "number" then num = v end
+    end
+    return qty, num
+end
 -- Минимальная цена по первым N результатам (ограничиваем 15 для производительности)
 local function GetMinPrice(count, getInfo, extractPrice)
     local minPrice = nil
@@ -114,12 +174,15 @@ local function UpdatePriceFromCommodity(itemID)
     if not C_AuctionHouse or not C_AuctionHouse.GetCommoditySearchResultsQuantity then return nil end
     local num = C_AuctionHouse.GetNumCommoditySearchResults and C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
     local qty = C_AuctionHouse.GetCommoditySearchResultsQuantity(itemID)
+    local qtySafe, numSafe = SafeCommodityQuantity(itemID)
+    if qtySafe ~= nil then qty = qtySafe end
+    if numSafe ~= nil then num = numSafe end
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
     local minPrice = GetMinPrice(num, function(i)
         return C_AuctionHouse.GetCommoditySearchResultInfo and C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
     end, function(info) return info.unitPrice end)
     if minPrice then
-        Auction.SetPrice(itemID, minPrice, "commodity")
+        Auction.SetPrice(itemID, minPrice, "commodity", qty, num)
         return minPrice
     end
     return nil
@@ -129,24 +192,32 @@ local function UpdatePriceFromItem(itemKey, itemID)
     if not C_AuctionHouse or not C_AuctionHouse.GetItemSearchResultsQuantity then return nil end
     local num = C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetNumItemSearchResults(itemKey) or 0
     local qty = C_AuctionHouse.GetItemSearchResultsQuantity(itemKey)
+    local qtySafe, numSafe = SafeItemQuantity(itemKey)
+    if qtySafe ~= nil then qty = qtySafe end
+    if numSafe ~= nil then num = numSafe end
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
     local minPrice = GetMinPrice(num, function(i)
         return C_AuctionHouse.GetItemSearchResultInfo and C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
     end, function(info) return info.buyoutAmount or info.minBid end)
     -- Fallback: browse results (когда item-поиск пуст, но browse что-то вернул)
+    local browseQty = nil
     if not minPrice and C_AuctionHouse.GetBrowseResults then
         local browse = C_AuctionHouse.GetBrowseResults()
         if browse then
             for _, br in ipairs(browse) do
                 if br.itemKey and br.itemKey.itemID == itemID and br.minPrice then
                     local p = tonumber(br.minPrice)
-                    if p and (not minPrice or p < minPrice) then minPrice = p end
+                    if p and (not minPrice or p < minPrice) then
+                        minPrice = p
+                        if type(br.totalQuantity) == "number" then browseQty = br.totalQuantity end
+                    end
                 end
             end
         end
     end
     if minPrice then
-        Auction.SetPrice(itemID, minPrice, "item")
+        if qty == nil then qty = browseQty end
+        Auction.SetPrice(itemID, minPrice, "item", qty, num)
         return minPrice
     end
     return nil
@@ -240,7 +311,7 @@ local function ResolveItem(itemID)
     if C_AuctionHouse and C_AuctionHouse.HasFullCommoditySearchResults then
         local ok, full = pcall(C_AuctionHouse.HasFullCommoditySearchResults, itemID)
         if ok and full then
-            CacheEntry(itemID, { noauction = true, timestamp = Now(), source = "commodity-empty" })
+            CacheEntry(itemID, { noauction = true, timestamp = Now(), source = "commodity-empty", qty = 0, listings = 0 })
             attempts[itemID] = nil
             if wasPending then stats.resolved = stats.resolved + 1 end
             return

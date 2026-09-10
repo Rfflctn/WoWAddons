@@ -7,17 +7,120 @@ local L = DecorLumberProfitL10n.L
 local TL = DecorLumberProfitL10n.TL
 
 -- Общее описание колонок таблицы (ширины для заголовка и строк)
+-- Порядок = порядок в таблице. ahQty — конкуренция: сколько штук/лотів output на АХ.
 local COLUMNS = {
     { key = "recipe",       width = 150 },
     { key = "prof",         width = 95 },
     { key = "learned",      width = 55,  align = "CENTER" },
     { key = "wood",         width = 120 },
     { key = "sellPrice",    width = 85 },
+    { key = "ahQty",        width = 80,  align = "CENTER" },
     { key = "woodQty",      width = 45,  align = "CENTER" },
     { key = "maxWoodPrice", width = 100 },
     { key = "profit",       width = 100 },
 }
 UI.COLUMNS = COLUMNS -- читает MainFrame для шапки
+
+-- ==== Видимость колонок (чекбоксы «Столбцы», персист в DB.settings.hiddenColumns) ====
+-- UI._hiddenColumns: { [key] = true } — скрытые. nil/отсутствие = видимая.
+function UI.IsColumnVisible(key)
+    local h = UI._hiddenColumns
+    if h and h[key] then return false end
+    return true
+end
+
+function UI.GetVisibleColumns()
+    local out = {}
+    for _, c in ipairs(COLUMNS) do
+        if UI.IsColumnVisible(c.key) then out[#out + 1] = c end
+    end
+    if #out == 0 then out[1] = COLUMNS[1] end -- страховка: хоть что-то рисуем
+    return out
+end
+
+local function IsKnownColumn(key)
+    for _, c in ipairs(COLUMNS) do if c.key == key then return true end end
+    return false
+end
+
+-- Загружает скрытые колонки из SavedVariables (вызывает Commands при ADDON_LOADED).
+-- Невалидные ключи (от старых версий) молча отбрасываем.
+function UI.LoadColumnVisibility()
+    UI._hiddenColumns = {}
+    local saved = DecorLumberProfitDB and DecorLumberProfitDB.settings and DecorLumberProfitDB.settings.hiddenColumns
+    if type(saved) == "table" then
+        for k, v in pairs(saved) do
+            if v and IsKnownColumn(k) then UI._hiddenColumns[k] = true end
+        end
+    end
+end
+
+local function PersistColumnVisibility()
+    if DecorLumberProfitDB and DecorLumberProfitDB.settings then
+        local t = {}
+        for k, v in pairs(UI._hiddenColumns or {}) do
+            if v and IsKnownColumn(k) then t[k] = true end
+        end
+        DecorLumberProfitDB.settings.hiddenColumns = t
+    end
+end
+
+-- Показать/скрыть колонку + перераскладка (шапка, пул строк, Refresh).
+-- Возвращает true при успехе, false если ключ неизвестен или пытаются скрыть последнюю.
+function UI.SetColumnVisible(key, visible)
+    if not IsKnownColumn(key) then return false end
+    UI._hiddenColumns = UI._hiddenColumns or {}
+    if visible then
+        if not UI._hiddenColumns[key] then return true end
+        UI._hiddenColumns[key] = nil
+    else
+        if UI._hiddenColumns[key] then return true end
+        -- Нельзя скрыть последнюю видимую колонку
+        local n = 0
+        for _, c in ipairs(COLUMNS) do
+            if c.key ~= key and UI.IsColumnVisible(c.key) then n = n + 1 end
+        end
+        if n == 0 then
+            UI.SetStatus(DecorLumberProfitL10n.L.ST_AT_LEAST_ONE_COLUMN, 1, 0.7, 0.2)
+            if UI.RefreshColumnsPanel then UI.RefreshColumnsPanel() end
+            return false
+        end
+        UI._hiddenColumns[key] = true
+    end
+    PersistColumnVisibility()
+    if UI.LayoutHeaderCells then UI.LayoutHeaderCells() end
+    if UI._rows then
+        for _, row in ipairs(UI._rows) do
+            if row.Hide then
+                local ok = pcall(row.Hide, row)
+                if not ok then break end
+            end
+        end
+        if table.wipe then table.wipe(UI._rows) else UI._rows = {} end
+    end
+    UI._lastRowCount = nil
+    local sf = UI._scrollFrame
+    if sf and sf.SetVerticalScroll then pcall(sf.SetVerticalScroll, sf, 0) end
+    if UI.RefreshColumnsPanel then UI.RefreshColumnsPanel() end
+    if UI._mainFrame then UI.RefreshTable() end
+    return true
+end
+
+-- Показать все колонки (кнопка «Показать все» в панели).
+function UI.ResetColumns()
+    UI._hiddenColumns = {}
+    PersistColumnVisibility()
+    if UI.LayoutHeaderCells then UI.LayoutHeaderCells() end
+    if UI._rows then
+        for _, row in ipairs(UI._rows) do
+            if row.Hide then pcall(row.Hide, row) end
+        end
+        if table.wipe then table.wipe(UI._rows) else UI._rows = {} end
+    end
+    UI._lastRowCount = nil
+    if UI.RefreshColumnsPanel then UI.RefreshColumnsPanel() end
+    if UI._mainFrame then UI.RefreshTable() end
+end
 
 UI.BASE_WIDTH = DecorLumberProfitConfig.UI.WIDTH -- базовая ширина для масштаба колонок (Этап 9)
 UI._colScale = 1
@@ -103,10 +206,23 @@ local SORT_GETTERS = {
     learned      = function(rec, eco) return (rec.learned and 2 or (UI.HasOtherLearners(rec) and 1 or 0)) end,
     wood         = function(rec, eco) return UI.GetWoodDisplayName(rec):lower() end,
     sellPrice    = function(rec, eco) return eco.outputTotalPrice or -1 end,
+    ahQty        = function(rec, eco) return eco.ahQty or -1 end,
     woodQty      = function(rec, eco) return rec.woodQty or 0 end,
     maxWoodPrice = function(rec, eco) return eco.maxWoodPrice or -1e18 end,
     profit       = function(rec, eco) return eco.profit or -1e18 end,
 }
+
+-- Формат ячейки конкуренции: "qty (lots)" если известны оба, иначе одно число.
+-- Чистая функция (тесты). qty/listings могут быть nil — тогда nil (звать FillRow решает dash).
+function UI.FormatAuctionQuantity(qty, listings)
+    if qty == nil and listings == nil then return nil end
+    qty = tonumber(qty) or 0
+    listings = tonumber(listings)
+    if listings and listings > 0 and listings ~= qty then
+        return string.format("%d (%d)", qty, listings)
+    end
+    return tostring(qty)
+end
 
 local function SortPairs(pairs)
     local getter = UI._sortKey and SORT_GETTERS[UI._sortKey]
@@ -142,6 +258,7 @@ function UI.OnHeaderClick(key)
 end
 
 -- Создаёт строку таблицы (позиция выставляется при рендере — пул переиспользуется, Этап 9)
+-- Учитывает только видимые колонки (панель «Столбцы»); при смене видимости пул сносится.
 local function CreateRow(parent, width)
     local ROW_H = DecorLumberProfitConfig.UI.ROW_HEIGHT
     local row = CreateFrame("Frame", nil, parent)
@@ -157,7 +274,7 @@ local function CreateRow(parent, width)
 
     row.cols = {}
     local x = 0
-    for _, c in ipairs(COLUMNS) do
+    for _, c in ipairs(UI.GetVisibleColumns()) do
         local cw = UI.ColWidth(c.key, c.width)
         local off = (c.key == "recipe") and 20 or 2 -- отступ под иконку
         local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -199,6 +316,7 @@ local function EnsurePool(n)
 end
 
 -- Заполнение одной строки данными (позиция — по dataIndex, не по месту в пуле)
+-- Все обращения к row.cols.* за гардами: колонка может быть скрыта через панель «Столбцы».
 local function FillRow(row, p, dataIndex)
     local ROW_H = DecorLumberProfitConfig.UI.ROW_HEIGHT
     row._dataIndex = dataIndex
@@ -211,58 +329,85 @@ local function FillRow(row, p, dataIndex)
         if rec.icon then row._icon:SetTexture(rec.icon); row._icon:Show() else row._icon:Hide() end
     end
     -- Рецепт
-    row.cols.recipe:SetText(rec.name or ("#" .. (rec.recipeSpellID or "?")))
+    if row.cols.recipe then
+        row.cols.recipe:SetText(rec.name or ("#" .. (rec.recipeSpellID or "?")))
+    end
 
     -- Профессия
-    row.cols.prof:SetText(rec.profession or L.CELL_PROF_UNKNOWN)
+    if row.cols.prof then
+        row.cols.prof:SetText(rec.profession or L.CELL_PROF_UNKNOWN)
+    end
 
     -- Изучен ли рецепт: текущим персом / другим персом / никем
-    if rec.learned == true then
-        row.cols.learned:SetText(L.CELL_YES)
-    elseif UI.HasOtherLearners(rec) then
-        row.cols.learned:SetText(L.CELL_OTHER)
-    elseif rec.learned == false then
-        row.cols.learned:SetText(L.CELL_NO)
-    else
-        row.cols.learned:SetText(L.CELL_UNKNOWN)
+    if row.cols.learned then
+        if rec.learned == true then
+            row.cols.learned:SetText(L.CELL_YES)
+        elseif UI.HasOtherLearners(rec) then
+            row.cols.learned:SetText(L.CELL_OTHER)
+        elseif rec.learned == false then
+            row.cols.learned:SetText(L.CELL_NO)
+        else
+            row.cols.learned:SetText(L.CELL_UNKNOWN)
+        end
     end
 
     -- Используемая древесина
-    row.cols.wood:SetText(UI.GetWoodDisplayName(rec))
+    if row.cols.wood then
+        row.cols.wood:SetText(UI.GetWoodDisplayName(rec))
+    end
 
     -- Цена продажи
-    if eco.outputUnitPrice then
-        -- Показываем цену за штуку и суммарную
-        if rec.outputQty > 1 then
-            row.cols.sellPrice:SetText(UI.GetMoneyStr(eco.outputUnitPrice) .. " / " .. UI.GetMoneyStr(eco.outputTotalPrice))
+    if row.cols.sellPrice then
+        if eco.outputUnitPrice then
+            -- Показываем цену за штуку и суммарную
+            if rec.outputQty > 1 then
+                row.cols.sellPrice:SetText(UI.GetMoneyStr(eco.outputUnitPrice) .. " / " .. UI.GetMoneyStr(eco.outputTotalPrice))
+            else
+                row.cols.sellPrice:SetText(UI.GetMoneyStr(eco.outputUnitPrice))
+            end
         else
-            row.cols.sellPrice:SetText(UI.GetMoneyStr(eco.outputUnitPrice))
+            row.cols.sellPrice:SetText(L.CELL_NO_AH)
         end
-    else
-        row.cols.sellPrice:SetText(L.CELL_NO_AH)
     end
 
-    row.cols.woodQty:SetText(tostring(eco.woodQty or rec.woodQty or 0))
-
-    if eco.maxWoodPrice then
-        if eco.maxWoodPrice < 0 then
-            row.cols.maxWoodPrice:SetText("|cffff0000" .. UI.GetMoneyStr(eco.maxWoodPrice) .. "|r")
+    -- Конкуренция: сколько штук output выложено на АХ (qty + число лотов).
+    -- nil (не сканировали) — dash; 0 (пустой АХ, noauction) — "0".
+    if row.cols.ahQty then
+        local txt = UI.FormatAuctionQuantity(eco.ahQty, eco.ahListings)
+        if txt then
+            row.cols.ahQty:SetText(txt)
         else
-            row.cols.maxWoodPrice:SetText(UI.GetMoneyStr(eco.maxWoodPrice))
+            row.cols.ahQty:SetText(L.CELL_DASH)
         end
-    else
-        row.cols.maxWoodPrice:SetText(L.CELL_DASH)
     end
 
-    if eco.profit then
-        local col = eco.profit > 0 and "|cff00ff00" or (eco.profit < 0 and "|cffff0000" or "|cffffff00")
-        row.cols.profit:SetText(col .. UI.GetMoneyStr(eco.profit) .. "|r")
-    else
-        row.cols.profit:SetText(L.CELL_DASH)
+    if row.cols.woodQty then
+        row.cols.woodQty:SetText(tostring(eco.woodQty or rec.woodQty or 0))
+    end
+
+    if row.cols.maxWoodPrice then
+        if eco.maxWoodPrice then
+            if eco.maxWoodPrice < 0 then
+                row.cols.maxWoodPrice:SetText("|cffff0000" .. UI.GetMoneyStr(eco.maxWoodPrice) .. "|r")
+            else
+                row.cols.maxWoodPrice:SetText(UI.GetMoneyStr(eco.maxWoodPrice))
+            end
+        else
+            row.cols.maxWoodPrice:SetText(L.CELL_DASH)
+        end
+    end
+
+    if row.cols.profit then
+        if eco.profit then
+            local col = eco.profit > 0 and "|cff00ff00" or (eco.profit < 0 and "|cffff0000" or "|cffffff00")
+            row.cols.profit:SetText(col .. UI.GetMoneyStr(eco.profit) .. "|r")
+        else
+            row.cols.profit:SetText(L.CELL_DASH)
+        end
     end
 end
 
--- Пустое состояние: одна строка с сообщением
+-- Пустое состояние: одна строка с сообщением (в первой видимой колонке)
 local function RenderEmpty(msg)
     EnsurePool(1)
     local rows = UI._rows
@@ -273,7 +418,13 @@ local function RenderEmpty(msg)
     if row._bg then SetRowBG(row._bg, ZEBRA_ODD) end
     for _, fs in pairs(row.cols) do fs:SetText("") end
     if row._icon then row._icon:Hide() end
-    row.cols.recipe:SetText(msg)
+    local vis = UI.GetVisibleColumns()
+    local firstKey = vis[1] and vis[1].key or "recipe"
+    if row.cols[firstKey] then
+        row.cols[firstKey]:SetText(msg)
+    elseif row.cols.recipe then
+        row.cols.recipe:SetText(msg)
+    end
     row:Show()
     for i = 2, #rows do rows[i]:Hide() end
 end
@@ -305,10 +456,26 @@ function UI.RenderVisibleRows()
     for i = count + 1, #rows do rows[i]:Hide() end
 end
 
+-- Добивка eco конкуренцией с АХ (не меняет формулу Economy: только отображение/сортировка).
+local function AttachAuctionQuantity(rec, eco)
+    if not eco or not rec or not rec.outputItemID then return eco end
+    local P = _G.DecorLumberProfitPrices
+    if P and P.GetCachedQuantity then
+        local ok, qty, listings = pcall(P.GetCachedQuantity, rec.outputItemID)
+        if ok then
+            eco.ahQty = qty
+            eco.ahListings = listings
+        end
+    end
+    return eco
+end
+
 local function ComputePairs(recipes, priceMap)
     local arr = {}
     for _, rec in ipairs(recipes) do
-        table.insert(arr, { rec = rec, eco = DecorLumberProfitCore:CalculateRecipeEconomy(rec, priceMap) })
+        local eco = DecorLumberProfitCore:CalculateRecipeEconomy(rec, priceMap)
+        AttachAuctionQuantity(rec, eco)
+        table.insert(arr, { rec = rec, eco = eco })
     end
     return arr
 end
@@ -319,6 +486,7 @@ local function ComputeTopPairs(priceMap, recipes)
     for _, rec in ipairs(recipes or UI._currentRecipes) do
         if rec.woodItemID then
             local eco = DecorLumberProfitCore:CalculateRecipeEconomy(rec, priceMap)
+            AttachAuctionQuantity(rec, eco)
             if eco.maxWoodPrice then
                 local g = groups[rec.woodItemID]
                 if not g then g = {}; groups[rec.woodItemID] = g end

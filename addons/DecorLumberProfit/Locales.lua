@@ -15,6 +15,8 @@ DecorLumberProfitLocale = {
         BTN_TOP = "Top profit",
         BTN_SHOW_ALL = "Show all",
         CHK_HIDE_UNLEARNED = "Hide unlearned",
+        BTN_COLUMNS = "Columns",
+        BTN_SHOW_ALL_COLUMNS = "Show all",
 
         -- Тултипы кнопок
         TIP_REFRESH_TITLE = "Add recipes from the active window",
@@ -32,6 +34,8 @@ DecorLumberProfitLocale = {
         TIP_TOP_L1 = "For each lumber type shows 3 recipes with the highest \"max lumber price\" — the price per unit at which crafting still breaks even.",
         TIP_TOP_L2 = "The higher it is above the market lumber price, the more profitable the craft. Press again to switch to \"Show all\".",
         TIP_HIDE_UNLEARNED = "Hides recipes that are not learned by any character on the account.",
+        TIP_COLUMNS_TITLE = "Table columns",
+        TIP_COLUMNS_L1 = "Choose which columns to show. At least one must stay visible. Saved for the account.",
 
         -- Колонки таблицы
         HEAD_RECIPE = "Recipe",
@@ -39,6 +43,7 @@ DecorLumberProfitLocale = {
         HEAD_LEARNED = "Learned",
         HEAD_WOOD = "Lumber",
         HEAD_SELL = "Sale",
+        HEAD_AHQTY = "On AH",
         HEAD_WOODQTY = "Wood",
         HEAD_MAXPRICE = "Wood price",
         HEAD_PROFIT = "Profit",
@@ -47,6 +52,7 @@ DecorLumberProfitLocale = {
         HINT_LEARNED = "Is the recipe learned by this character (\"other\" — learned by another character on the account). Click to sort.",
         HINT_WOOD = "Which lumber the recipe consumes. Click to sort.",
         HINT_SELL = "Market price of the crafted item: per unit / total per craft. Click to sort.",
+        HINT_AHQTY = "How many of the crafted item are listed on the auction house: total pieces (lots). High values mean high competition. Click to sort.",
         HINT_WOODQTY = "Lumber units consumed per craft. Click to sort.",
         HINT_MAXPRICE = "Economically acceptable lumber PRICE for this recipe: (sale − other reagents cost) / lumber qty. Crafting is profitable while lumber purchase/market price is BELOW this value. Click to sort.",
         HINT_PROFIT = "Profit per craft: sale − all reagents, including lumber at market price. Click to sort.",
@@ -68,10 +74,12 @@ DecorLumberProfitLocale = {
         TIP_CREATES_ITEM = "Creates: Item %d x%d",
         TIP_PROFESSION = "Profession: %s",
         TIP_REAGENTS = "Reagents:",
+        TIP_AHQTY_LINE = "On AH: %s",
         TIP_NO_PRICE_FOR = "No price for: %s",
 
         -- Статусы и сообщения
         ST_WELCOME = "Press \"Update recipes\" to scan.",
+        ST_AT_LEAST_ONE_COLUMN = "At least one column must stay visible.",
         ST_EMPTY_TABLE = "|cffffd200No recipes with tracked lumber types|r",
         ST_ALL_HIDDEN = "|cffffd200All %d recipes hidden — not learned by any character|r",
         ST_HIDDEN_SUFFIX = "Hidden (unlearned): %d | ",
@@ -141,6 +149,8 @@ DecorLumberProfitLocale = {
         BTN_TOP = "Топ выгода",
         BTN_SHOW_ALL = "Показать все",
         CHK_HIDE_UNLEARNED = "Скрыть неизученное",
+        BTN_COLUMNS = "Столбцы",
+        BTN_SHOW_ALL_COLUMNS = "Показать все",
 
         -- Тултипы кнопок
         TIP_REFRESH_TITLE = "Добавить рецепты из активного окна",
@@ -158,6 +168,8 @@ DecorLumberProfitLocale = {
         TIP_TOP_L1 = "Для каждого вида древесины показывает 3 рецепта с наивысшей «макс. ценой древ.» — ценой за штуку, при которой крафт ещё выходит в ноль.",
         TIP_TOP_L2 = "Чем она выше рыночной цены древесины, тем выгоднее крафт. Повторное нажатие — «Показать все».",
         TIP_HIDE_UNLEARNED = "Скрывает рецепты, которые не изучены ни на одном персонаже аккаунта.",
+        TIP_COLUMNS_TITLE = "Столбцы таблицы",
+        TIP_COLUMNS_L1 = "Выберите, какие столбцы показывать. Хотя бы один должен остаться видимым. Сохраняется для аккаунта.",
 
         -- Колонки таблицы
         HEAD_RECIPE = "Рецепт",
@@ -165,6 +177,7 @@ DecorLumberProfitLocale = {
         HEAD_LEARNED = "Изучен",
         HEAD_WOOD = "Древесина",
         HEAD_SELL = "Продажа",
+        HEAD_AHQTY = "На АХ",
         HEAD_WOODQTY = "Древ.",
         HEAD_MAXPRICE = "Цена др.",
         HEAD_PROFIT = "Прибыль",
@@ -173,6 +186,7 @@ DecorLumberProfitLocale = {
         HINT_LEARNED = "Изучен ли рецепт текущим персонажем («др.перс» — изучен другим персонажем аккаунта). Клик — сортировка.",
         HINT_WOOD = "Какая древесина расходуется в рецепте. Клик — сортировка.",
         HINT_SELL = "Цена готового предмета на аукционе: за штуку / всего за один крафт. Клик — сортировка.",
+        HINT_AHQTY = "Сколько готового предмета выставлено на аукционе: всего штук (лотов). Большие значения — высокая конкуренция. Клик — сортировка.",
         HINT_WOODQTY = "Сколько штук древесины уходит на один крафт. Клик — сортировка.",
         HINT_MAXPRICE = "Экономически допустимая ЦЕНА древесины для этого рецепта: (продажа − себестоимость прочих реагентов) / кол-во древесины. Крафт выгоден, пока закупочная/рыночная цена древесины НИЖЕ этого значения. Клик — сортировка.",
         HINT_PROFIT = "Прибыль с одного крафта: продажа − все реагенты, включая древесину по её рыночной цене. Клик — сортировка.",
@@ -194,10 +208,12 @@ DecorLumberProfitLocale = {
         TIP_CREATES_ITEM = "Создаёт: Item %d x%d",
         TIP_PROFESSION = "Профессия: %s",
         TIP_REAGENTS = "Реагенты:",
+        TIP_AHQTY_LINE = "На АХ: %s",
         TIP_NO_PRICE_FOR = "Нет цены для: %s",
 
         -- Статусы и сообщения
         ST_WELCOME = "Нажмите «Обновить рецепты» для поиска.",
+        ST_AT_LEAST_ONE_COLUMN = "Хотя бы один столбец должен остаться видимым.",
         ST_EMPTY_TABLE = "|cffffd200Нет рецептов с древесиной из отслеживаемых типов|r",
         ST_ALL_HIDDEN = "|cffffd200Скрыто все рецепты (%d шт.) — не изучены ни на одном персонаже|r",
         ST_HIDDEN_SUFFIX = "Скрыто (не изучено): %d | ",

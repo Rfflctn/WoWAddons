@@ -34,6 +34,7 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         if loc ~= "enUS" and loc ~= "ruRU" then loc = DecorLumberProfitL10n.DetectLocale() end
         DecorLumberProfitL10n.SetLocale(loc)
         UI.hideUnlearned = DecorLumberProfitDB.settings.hideUnlearned and true or false
+        if UI.LoadColumnVisibility then UI.LoadColumnVisibility() end
         UI.RegisterPopups()
 
         SLASH_DECORLUMBERPROFIT1 = "/dlp"

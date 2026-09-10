@@ -76,5 +76,21 @@ function UI.ShowRowTooltip(row, dataIndex)
     if eco and eco.missingReagents and #eco.missingReagents > 0 then
         GameTooltip:AddLine(TL("TIP_NO_PRICE_FOR", table.concat(eco.missingReagents, ", ")), 1, 0.3, 0.3)
     end
+    -- Конкуренция: сколько готового предмета висит на АХ (та же цифра, что в колонке «На АХ»)
+    if rec.outputItemID then
+        local P = _G.DecorLumberProfitPrices
+        if P and P.GetCachedQuantity and UI.FormatAuctionQuantity then
+            local ok, qty, listings = pcall(P.GetCachedQuantity, rec.outputItemID)
+            if ok then
+                local txt = UI.FormatAuctionQuantity(qty, listings)
+                if txt then
+                    GameTooltip:AddLine(TL("TIP_AHQTY_LINE", txt), 0.7, 0.9, 1)
+                end
+            end
+        elseif eco and eco.ahQty ~= nil and UI.FormatAuctionQuantity then
+            local txt = UI.FormatAuctionQuantity(eco.ahQty, eco.ahListings)
+            if txt then GameTooltip:AddLine(TL("TIP_AHQTY_LINE", txt), 0.7, 0.9, 1) end
+        end
+    end
     GameTooltip:Show()
 end
