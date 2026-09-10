@@ -129,14 +129,14 @@ function UI.RequestAuctionUpdate()
     end
     local _, need = DecorLumberProfitPrices.CollectPricesForRecipes(UI._currentRecipes)
     if #need == 0 then
-        UI.SetStatus(TL("ST_PRICES_CACHED", (DecorLumberProfitConfig.AUCTION.PRICE_TTL / 60)), 0.7, 0.7, 1)
+        UI.SetStatus(TL("ST_PRICES_CACHED", (DecorLumberProfitConfig.AUCTION.PRICE_TTL / 60)) .. UI.PriceTimeSuffix(), 0.7, 0.7, 1)
         UI.RefreshTable()
         return
     end
     -- Фильтруем только уникальные
     local uniq, seen = {}, {}
     for _, id in ipairs(need) do if not seen[id] then seen[id] = true; table.insert(uniq, id) end end
-    UI.SetStatus(TL("ST_PRICES_REQUESTED", #uniq), 0.3, 0.8, 1)
+    UI.SetStatus(TL("ST_PRICES_REQUESTED", #uniq) .. UI.PriceTimeSuffix(), 0.3, 0.8, 1)
     DecorLumberProfitPrices.RequestPrices(uniq)
 end
 

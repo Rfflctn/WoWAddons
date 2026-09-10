@@ -62,6 +62,90 @@ end
 function Recipes.GetWoodIDs() return GetWoodIDs() end
 function Recipes.IsWoodItem(itemID) return IsWoodID(itemID) end
 
+-- ==== Нормализация профессий: подвиды дополнений -> базовая профессия ====
+-- Blizzard отдаёт вариант ("Зандаларское кузнечное дело", "Khaz Algar Blacksmithing")
+-- в ProfessionInfo.professionName, а базу — в parentProfessionName.
+-- parent — истина (все локали сразу); подстрока — фолбэк для старых сейвов/клиентов без parent.
+local PROF_BASE_EN = {
+    "Blacksmithing", "Leatherworking", "Alchemy", "Herbalism", "Cooking",
+    "Mining", "Tailoring", "Engineering", "Enchanting", "Fishing",
+    "Skinning", "Jewelcrafting", "Inscription", "Archaeology", "First Aid",
+    "Carpentry",
+}
+
+local PROF_BASE_RU = {
+    "Кузнечное дело", "Кожевничество", "Алхимия", "Травничество", "Кулинария",
+    "Горное дело", "Портняжное дело", "Инженерия", "Наложение чар", "Рыбалка",
+    "Снятие шкур", "Ювелирное дело", "Начертание", "Археология", "Первая помощь",
+}
+
+-- Нижний регистр первой буквы без UTF-8 либы (WoW Lua 5.1): кириллица — картой, латиница — :lower().
+-- Нужен для вариантов вида "Зандаларское кузнечное дело" (база "Кузнечное дело" со строчной "к").
+local CYR_LOWER_FIRST = {
+    ["А"] = "а", ["Б"] = "б", ["В"] = "в", ["Г"] = "г", ["Д"] = "д",
+    ["Е"] = "е", ["Ё"] = "ё", ["Ж"] = "ж", ["З"] = "з", ["И"] = "и",
+    ["Й"] = "й", ["К"] = "к", ["Л"] = "л", ["М"] = "м", ["Н"] = "н",
+    ["О"] = "о", ["П"] = "п", ["Р"] = "р", ["С"] = "с", ["Т"] = "т",
+    ["У"] = "у", ["Ф"] = "ф", ["Х"] = "х", ["Ц"] = "ц", ["Ч"] = "ч",
+    ["Ш"] = "ш", ["Щ"] = "щ", ["Ъ"] = "ъ", ["Ы"] = "ы", ["Ь"] = "ь",
+    ["Э"] = "э", ["Ю"] = "ю", ["Я"] = "я",
+}
+
+local function LowerFirst(s)
+    if type(s) ~= "string" or s == "" then return s end
+    local b1 = s:byte(1)
+    local first, rest
+    if b1 and b1 >= 128 then
+        first, rest = s:sub(1, 2), s:sub(3) -- кириллица в UTF-8 — 2 байта
+    else
+        first, rest = s:sub(1, 1), s:sub(2)
+    end
+    local low = CYR_LOWER_FIRST[first] or first:lower()
+    return low .. (rest or "")
+end
+
+local function Trim(s)
+    if type(s) ~= "string" then return s end
+    return s:match("^%s*(.-)%s*$")
+end
+
+-- "Зандаларское кузнечное дело" -> "Кузнечное дело", "Khaz Algar Blacksmithing" -> "Blacksmithing".
+-- Неизвестное имя возвращается как есть (trim), nil — nil.
+function Recipes.NormalizeProfessionName(name)
+    if name == nil then return nil end
+    if type(name) ~= "string" then return name end
+    local t = Trim(name)
+    if t == "" then return t end
+    local best, bestLen = nil, 0
+    local lower = t:lower() -- для en (ASCII) корректен; кириллицу не портит
+    for _, base in ipairs(PROF_BASE_EN) do
+        local bl = base:lower()
+        if lower:find(bl, 1, true) and #base > bestLen then
+            best, bestLen = base, #base
+        end
+    end
+    if best then return best end
+    for _, base in ipairs(PROF_BASE_RU) do
+        if t:find(base, 1, true) or t:find(LowerFirst(base), 1, true) then
+            if #base > bestLen then best, bestLen = base, #base end
+        end
+    end
+    if best then return best end
+    return t
+end
+
+-- База из ProfessionInfo: parentProfessionName (истина) -> нормализация professionName -> nil.
+local function GetBaseProfessionName(profInfo)
+    if type(profInfo) ~= "table" then return nil end
+    if type(profInfo.parentProfessionName) == "string" and Trim(profInfo.parentProfessionName) ~= "" then
+        return Trim(profInfo.parentProfessionName)
+    end
+    if type(profInfo.professionName) == "string" then
+        return Recipes.NormalizeProfessionName(profInfo.professionName)
+    end
+    return nil
+end
+
 -- ==== Схемы рецептов ====
 
 local function SchematicUsesWood(schematic, woodSetOrID)
@@ -216,7 +300,7 @@ function Recipes.GetRecipeData(recipeSpellID)
         recipeSpellID = recipeSpellID,
         recipeID = schematic.recipeID,
         name = schematic.name or (info and info.name) or ("Spell "..recipeSpellID),
-        profession = profInfo and profInfo.professionName or nil,
+        profession = GetBaseProfessionName(profInfo),
         outputItemID = outputItemID,
         outputMin = schematic.quantityMin or 1,
         outputMax = schematic.quantityMax or 1,

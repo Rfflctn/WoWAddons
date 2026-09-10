@@ -19,6 +19,7 @@ local lastSentItemID = nil
 local overflowHead = 1 -- голова overflow (Этап 7: O(1) вместо table.remove(overflow, 1))
 local sentAt = {}     -- [itemID] = GetTime() отправки (Этап 7: батч-sweep вместо N C_Timer.After)
 local stats = { requested = 0, resolved = 0 } -- прогресс очереди для UI/status (Этап 7)
+local lastPriceUpdate = nil -- timestamp time() последнего успешного обновления цены (задача: время в статусе)
 local MAX_ATTEMPTS = 3
 local RESOLVE_DELAY = 1.5
 
@@ -35,12 +36,32 @@ local function GetTTL() return CfgNumber("PRICE_TTL", 900) end
 local function GetDelay() return CfgNumber("QUERY_DELAY", 0.75) end
 local function GetQueueCap() return CfgNumber("MAX_QUEUE", 400) end
 
+-- Штамп последнего обновления цен (память + SavedVariables, переживает /reload)
+local function TouchPriceUpdate()
+    lastPriceUpdate = Now()
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.priceUpdatedAt = lastPriceUpdate
+end
+
 -- Единая точка записи в кэш: память + SavedVariables
 local function CacheEntry(itemID, entry)
     priceCache[itemID] = entry
     DecorLumberProfitDB = DecorLumberProfitDB or {}
     DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
     DecorLumberProfitDB.priceCache[itemID] = entry
+    TouchPriceUpdate()
+end
+
+-- Время последнего успешного обновления цен (timestamp time()) или nil («ещё не обновляли»).
+-- Фолбэк на SavedVariables — переживает /reload даже до первого SetPrice в сессии.
+function Auction.GetLastPriceUpdate()
+    if lastPriceUpdate then return lastPriceUpdate end
+    local saved = DecorLumberProfitDB and DecorLumberProfitDB.priceUpdatedAt
+    if type(saved) == "number" and saved > 0 then
+        lastPriceUpdate = saved
+        return saved
+    end
+    return nil
 end
 
 local function IsExpired(entry, ttl)
@@ -109,8 +130,10 @@ end
 
 function Auction.ClearPriceCache()
     priceCache = {}
+    lastPriceUpdate = nil
     if DecorLumberProfitDB then
         DecorLumberProfitDB.priceCache = {}
+        DecorLumberProfitDB.priceUpdatedAt = nil
     end
 end
 
@@ -157,29 +180,32 @@ local function SafeItemQuantity(itemKey)
     end
     return qty, num
 end
--- Минимальная цена по первым N результатам (ограничиваем 15 для производительности)
+-- Минимальная цена по первым N результатам (ограничиваем 15 для производительности).
+-- Все вызовы API за pcall: в Midnight методы могут кидать (taint/secret) — скан не должен рваться.
 local function GetMinPrice(count, getInfo, extractPrice)
     local minPrice = nil
     local limit = math.min(count or 0, 15)
     for i = 1, limit do
-        local info = getInfo(i)
-        local p = info and extractPrice(info)
-        p = p and tonumber(p)
-        if p and (not minPrice or p < minPrice) then minPrice = p end
+        local ok, info = pcall(getInfo, i)
+        if ok and info then
+            local ok2, p = pcall(extractPrice, info)
+            if ok2 then
+                p = p and tonumber(p)
+                if p and (not minPrice or p < minPrice) then minPrice = p end
+            end
+        end
     end
     return minPrice
 end
 
 local function UpdatePriceFromCommodity(itemID)
-    if not C_AuctionHouse or not C_AuctionHouse.GetCommoditySearchResultsQuantity then return nil end
-    local num = C_AuctionHouse.GetNumCommoditySearchResults and C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
-    local qty = C_AuctionHouse.GetCommoditySearchResultsQuantity(itemID)
-    local qtySafe, numSafe = SafeCommodityQuantity(itemID)
-    if qtySafe ~= nil then qty = qtySafe end
-    if numSafe ~= nil then num = numSafe end
+    if not C_AuctionHouse then return nil end
+    -- Только Safe-версии (внутри pcall): прямые вызовы без гардов рвали весь скан при ошибке API.
+    local qty, num = SafeCommodityQuantity(itemID)
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
     local minPrice = GetMinPrice(num, function(i)
-        return C_AuctionHouse.GetCommoditySearchResultInfo and C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+        if not C_AuctionHouse.GetCommoditySearchResultInfo then return nil end
+        return C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
     end, function(info) return info.unitPrice end)
     if minPrice then
         Auction.SetPrice(itemID, minPrice, "commodity", qty, num)
@@ -189,15 +215,12 @@ local function UpdatePriceFromCommodity(itemID)
 end
 
 local function UpdatePriceFromItem(itemKey, itemID)
-    if not C_AuctionHouse or not C_AuctionHouse.GetItemSearchResultsQuantity then return nil end
-    local num = C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetNumItemSearchResults(itemKey) or 0
-    local qty = C_AuctionHouse.GetItemSearchResultsQuantity(itemKey)
-    local qtySafe, numSafe = SafeItemQuantity(itemKey)
-    if qtySafe ~= nil then qty = qtySafe end
-    if numSafe ~= nil then num = numSafe end
+    if not C_AuctionHouse then return nil end
+    local qty, num = SafeItemQuantity(itemKey)
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
     local minPrice = GetMinPrice(num, function(i)
-        return C_AuctionHouse.GetItemSearchResultInfo and C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
+        if not C_AuctionHouse.GetItemSearchResultInfo then return nil end
+        return C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
     end, function(info) return info.buyoutAmount or info.minBid end)
     -- Fallback: browse results (когда item-поиск пуст, но browse что-то вернул)
     local browseQty = nil
@@ -307,7 +330,8 @@ local function ResolveItem(itemID)
         if wasPending then stats.resolved = stats.resolved + 1 end
         return
     end
-    -- Полные результаты по commodity и ноль лотов = предмета нет на аукционе -> кэшируем как "нет аукционов"
+    -- Полные результаты и ноль лотов = предмета нет на аукционе -> кэшируем как "нет аукционов".
+    -- Проверяем и commodity, и item: некоммодити (экипировка и т.п.) иначе ретраились бы вечно.
     if C_AuctionHouse and C_AuctionHouse.HasFullCommoditySearchResults then
         local ok, full = pcall(C_AuctionHouse.HasFullCommoditySearchResults, itemID)
         if ok and full then
@@ -315,6 +339,18 @@ local function ResolveItem(itemID)
             attempts[itemID] = nil
             if wasPending then stats.resolved = stats.resolved + 1 end
             return
+        end
+    end
+    if C_AuctionHouse and C_AuctionHouse.HasFullItemSearchResults and C_AuctionHouse.MakeItemKey then
+        local okKey, itemKey = pcall(C_AuctionHouse.MakeItemKey, itemID, 0, 0, 0)
+        if okKey and itemKey then
+            local ok, full = pcall(C_AuctionHouse.HasFullItemSearchResults, itemKey)
+            if ok and full then
+                CacheEntry(itemID, { noauction = true, timestamp = Now(), source = "item-empty", qty = 0, listings = 0 })
+                attempts[itemID] = nil
+                if wasPending then stats.resolved = stats.resolved + 1 end
+                return
+            end
         end
     end
     -- Ответ не пришёл (троттл/дроп/таймаут) — ретраим; дропнутый троттлом запрос не тратит попытку
@@ -490,7 +526,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             end
         else
             -- COMMODITY_SEARCH_RESULTS_RECEIVED без аргумента — пробуем обновить все pending commodity
-            for id in pairs(pending) do Auction.TryUpdateFromCache(id) end
+            for id in pairs(pending) do
+                Auction.TryUpdateFromCache(id)
+                if priceCache[id] and priceCache[id].price then
+                    ClearPending(id)
+                end
+            end
         end
         NotifyPriceUpdate()
     elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
@@ -504,7 +545,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             NotifyPriceUpdate()
         end
     elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "EXTRA_BROWSE_INFO_RECEIVED" then
-        for id in pairs(pending) do Auction.TryUpdateFromCache(id) end
+        for id in pairs(pending) do
+            Auction.TryUpdateFromCache(id)
+            if priceCache[id] and priceCache[id].price then
+                ClearPending(id)
+            end
+        end
         NotifyPriceUpdate()
     elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
         -- Продолжаем очередь
@@ -529,10 +575,14 @@ function Auction.CollectPricesForRecipes(recipes)
     local function Collect(id)
         if handled[id] then return end
         handled[id] = true
-        local p, entry = Auction.GetCachedPrice(id)
-        if p then
-            map[id] = p
-        elseif not (entry and entry.noauction) then
+        -- TTL-корректно: свежесть решает HasFreshPrice, а не наличие записи.
+        -- Раньше протухшая цена в памяти считалась свежей (GetCachedPrice без TTL),
+        -- а протухший noauction вообще никогда не перезапрашивался.
+        if Auction.HasFreshPrice(id) then
+            local p = Auction.GetCachedPrice(id)
+            if p then map[id] = p end
+            -- свежий noauction: ни в map, ни в need (цены нет и не будет до протухания)
+        else
             table.insert(need, id)
         end
     end
@@ -580,6 +630,7 @@ function Auction.GetQueueInfo()
         processing = isProcessing,
         requested = stats.requested,
         resolved = stats.resolved,
+        lastUpdate = Auction.GetLastPriceUpdate(),
     }
 end
 

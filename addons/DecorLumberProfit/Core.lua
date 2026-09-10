@@ -88,6 +88,13 @@ end
 
 -- TryGetActiveRecipeSpellIDs — в Services/Recipes.lua (Этап 4).
 
+-- Нормализация профессий — в Services/Recipes.lua (подвиды -> база). Тонкий враппер.
+function Core:NormalizeProfessionName(name)
+    local R = _G.DecorLumberProfitRecipes
+    if R and R.NormalizeProfessionName then return R.NormalizeProfessionName(name) end
+    return name
+end
+
 -- Диагностика активного окна — в Services/Recipes.lua (Этап 4). /dump-алиасы сохранены.
 function Core:DebugActive()
     local R = _G.DecorLumberProfitRecipes

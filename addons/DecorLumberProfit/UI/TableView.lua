@@ -212,6 +212,31 @@ local SORT_GETTERS = {
     profit       = function(rec, eco) return eco.profit or -1e18 end,
 }
 
+-- Суффикс статуса с временем последнего обновления цен: " | Цены: 12:34:56" или " | Цены: —".
+-- Чистая обёртка над Prices.GetLastPriceUpdate (тестируема через подмену GetLastPriceUpdate).
+function UI.PriceTimeSuffix()
+    local P = _G.DecorLumberProfitPrices
+    local ts = nil
+    if P and P.GetLastPriceUpdate then
+        local ok, v = pcall(P.GetLastPriceUpdate)
+        if ok then ts = v end
+    end
+    if type(ts) ~= "number" then
+        return L.ST_PRICES_NEVER
+    end
+    local timestr = nil
+    if _G.date then
+        local ok, s = pcall(_G.date, "%H:%M:%S", ts)
+        if ok and type(s) == "string" then timestr = s end
+    end
+    if not timestr and os and os.date then
+        local ok, s = pcall(os.date, "%H:%M:%S", ts)
+        if ok and type(s) == "string" then timestr = s end
+    end
+    timestr = timestr or tostring(ts)
+    return TL("ST_PRICES_TIME", timestr)
+end
+
 -- Формат ячейки конкуренции: "qty (lots)" если известны оба, иначе одно число.
 -- Чистая функция (тесты). qty/listings могут быть nil — тогда nil (звать FillRow решает dash).
 function UI.FormatAuctionQuantity(qty, listings)
@@ -601,12 +626,12 @@ function UI.RefreshTable()
                 prog = TL("ST_QUEUE_PROGRESS", qi.resolved or 0, qi.requested or 0)
             end
         end
-        UI.SetStatus(prefix .. TL("ST_QUEUED", #displayList, missing, #need) .. prog, 1, 0.82, 0)
+        UI.SetStatus(prefix .. TL("ST_QUEUED", #displayList, missing, #need) .. prog .. UI.PriceTimeSuffix(), 1, 0.82, 0)
     else
         if missing > 0 then
-            UI.SetStatus(prefix .. TL("ST_PARTIAL", #displayList, missing), 1, 1, 0.6)
+            UI.SetStatus(prefix .. TL("ST_PARTIAL", #displayList, missing) .. UI.PriceTimeSuffix(), 1, 1, 0.6)
         else
-            UI.SetStatus(prefix .. TL("ST_OK", #displayList), 0.3, 1, 0.3)
+            UI.SetStatus(prefix .. TL("ST_OK", #displayList) .. UI.PriceTimeSuffix(), 0.3, 1, 0.3)
         end
     end
 end
@@ -618,7 +643,7 @@ function UI.OnPriceUpdate()
 end
 
 function UI.OnAuctionScanFinished()
-    UI.SetStatus(L.ST_SCAN_DONE, 0.3, 1, 0.3)
+    UI.SetStatus(L.ST_SCAN_DONE .. UI.PriceTimeSuffix(), 0.3, 1, 0.3)
     UI.RefreshTable()
 end
 

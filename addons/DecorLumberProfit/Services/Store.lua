@@ -137,10 +137,16 @@ function Store.SerializeRecipe(rec)
         reagents[i] = { itemID = r.itemID, quantity = r.quantity, required = r.required,
                         slotIndex = r.slotIndex, reagentType = r.reagentType, isWood = r.isWood }
     end
+    local prof = rec.profession
+    local Recipes = _G.DecorLumberProfitRecipes
+    if type(prof) == "string" and Recipes and Recipes.NormalizeProfessionName then
+        local ok, norm = pcall(Recipes.NormalizeProfessionName, prof)
+        if ok and type(norm) == "string" and norm ~= "" then prof = norm end
+    end
     return {
         recipeSpellID = rec.recipeSpellID,
         name = rec.name,
-        profession = rec.profession,
+        profession = prof,
         outputItemID = rec.outputItemID,
         outputQty = rec.outputQty, outputMin = rec.outputMin, outputMax = rec.outputMax,
         icon = rec.icon,
@@ -213,10 +219,21 @@ function Store.LoadSavedRecipes()
         if ItemInfo and ItemInfo.IsUnsellable then return ItemInfo.IsUnsellable(itemID) end
         return false
     end
+    local Recipes = _G.DecorLumberProfitRecipes
     for spellID, ser in pairs(DecorLumberProfitDB.recipes) do
         if type(ser) == "table" and ser.recipeSpellID then
             local rec = {}
             for k, v in pairs(ser) do rec[k] = v end
+            -- Миграция на лету: старые сейвы хранят варианты ("Зандаларское ...") — сводим к базе.
+            if type(rec.profession) == "string" and Recipes and Recipes.NormalizeProfessionName then
+                local ok, norm = pcall(Recipes.NormalizeProfessionName, rec.profession)
+                if ok and type(norm) == "string" and norm ~= "" then
+                    rec.profession = norm
+                    if type(ser.profession) ~= "string" or ser.profession ~= norm then
+                        ser.profession = norm -- чиним и базу, чтобы не мигрировать каждый раз
+                    end
+                end
+            end
             -- learned текущего персонажа: приоритет — его запись в learnedBy,
             -- иначе legacy-фолбэк ser.learned (сейвы до пер-персонажного учёта)
             if type(ser.learnedBy) == "table" then
