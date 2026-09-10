@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "lmstudio/qwen3.8-27b@iq3_s",
+  "small_model": "lmstudio/qwen3.8-27b@iq3_s",
+  "provider": {
+    "lmstudio": {
+      "name": "LM Studio",
+      "api": "openai",
+      "options": {
+        "baseURL": "http://localhost:1234/v1",
+        "apiKey": "lm-studio",
+        "timeout": 120000
+      },
+      "models": {
+        "qwen3.8-27b@iq3_s": {
+          "name": "Qwen 3.8 27B (IQ3_S)",
+          "family": "qwen3",
+          "attachment": false,
+          "reasoning": false,
+          "temperature": true,
+          "tool_call": true,
+          "limit": {
+            "context": 32768,
+            "output": 4096
+          }
+        }
+      }
+    }
+  }
+}

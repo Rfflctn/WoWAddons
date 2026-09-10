@@ -1,0 +1,18 @@
+# Доки-источники (~58 МБ, 9k файлов) — не коммитим, восстанавливаются скриптами fetch_*.py
+wiki-lua/
+
+# Python
+/tools/
+__pycache__/
+*.pyc
+*.py[cod]
+.venv/
+
+# Служебное
+C:\Users\REFLEC~1\AppData\Local\Temp\opencode/
+*.log
+.DS_Store
+Thumbs.db
+
+# Файлы
+AGENTS.md
