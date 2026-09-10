@@ -13,7 +13,6 @@ local COLUMNS = {
     { key = "learned",      width = 55,  align = "CENTER" },
     { key = "wood",         width = 120 },
     { key = "sellPrice",    width = 85 },
-    { key = "totalCost",    width = 90 },
     { key = "woodQty",      width = 45,  align = "CENTER" },
     { key = "maxWoodPrice", width = 100 },
     { key = "profit",       width = 100 },
@@ -104,7 +103,6 @@ local SORT_GETTERS = {
     learned      = function(rec, eco) return (rec.learned and 2 or (UI.HasOtherLearners(rec) and 1 or 0)) end,
     wood         = function(rec, eco) return UI.GetWoodDisplayName(rec):lower() end,
     sellPrice    = function(rec, eco) return eco.outputTotalPrice or -1 end,
-    totalCost    = function(rec, eco) return eco.costNoWood or -1 end,
     woodQty      = function(rec, eco) return rec.woodQty or 0 end,
     maxWoodPrice = function(rec, eco) return eco.maxWoodPrice or -1e18 end,
     profit       = function(rec, eco) return eco.profit or -1e18 end,
@@ -244,25 +242,13 @@ local function FillRow(row, p, dataIndex)
         row.cols.sellPrice:SetText(L.CELL_NO_AH)
     end
 
-    -- Себестоимость без стоимости древесины
-    local cnw = eco.costNoWood
-    if cnw and eco.hasUnknownPrice and cnw == 0 then
-        row.cols.totalCost:SetText(L.CELL_UNKNOWN_COST)
-    elseif cnw and eco.hasUnknownPrice then
-        row.cols.totalCost:SetText(UI.GetMoneyStr(cnw) .. "*")
-    elseif cnw then
-        row.cols.totalCost:SetText(UI.GetMoneyStr(cnw))
-    else
-        row.cols.totalCost:SetText(L.CELL_DASH)
-    end
-
     row.cols.woodQty:SetText(tostring(eco.woodQty or rec.woodQty or 0))
 
     if eco.maxWoodPrice then
         if eco.maxWoodPrice < 0 then
-            row.cols.maxWoodPrice:SetText("|cffff0000" .. UI.GetMoneyStr(math.floor(eco.maxWoodPrice)) .. "|r")
+            row.cols.maxWoodPrice:SetText("|cffff0000" .. UI.GetMoneyStr(eco.maxWoodPrice) .. "|r")
         else
-            row.cols.maxWoodPrice:SetText(UI.GetMoneyStr(math.floor(eco.maxWoodPrice)))
+            row.cols.maxWoodPrice:SetText(UI.GetMoneyStr(eco.maxWoodPrice))
         end
     else
         row.cols.maxWoodPrice:SetText(L.CELL_DASH)
@@ -270,7 +256,7 @@ local function FillRow(row, p, dataIndex)
 
     if eco.profit then
         local col = eco.profit > 0 and "|cff00ff00" or (eco.profit < 0 and "|cffff0000" or "|cffffff00")
-        row.cols.profit:SetText(col .. UI.GetMoneyStr(math.floor(eco.profit)) .. "|r")
+        row.cols.profit:SetText(col .. UI.GetMoneyStr(eco.profit) .. "|r")
     else
         row.cols.profit:SetText(L.CELL_DASH)
     end

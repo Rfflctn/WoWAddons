@@ -237,10 +237,10 @@ function Diag.SelfTest()
     end
     local Auction = _G.DecorLumberProfitPrices or _G.DecorLumberProfitAuction
     local Core = _G.DecorLumberProfitCore
-    add("money_gold_contains_12345", "true", function()
+    add("money_gold_contains_12346", "true", function()
         if not (Auction and Auction.FormatMoney) then return "false" end
         local s = Auction.FormatMoney(123456789)
-        return tostring(s and string.find(s, "12345", 1, true) ~= nil)
+        return tostring(s and string.find(s, "12346", 1, true) ~= nil)
     end)
     add("money_nil_emdash", "true", function()
         if not (Auction and Auction.FormatMoney) then return "false" end

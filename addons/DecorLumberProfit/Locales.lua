@@ -39,7 +39,6 @@ DecorLumberProfitLocale = {
         HEAD_LEARNED = "Learned",
         HEAD_WOOD = "Lumber",
         HEAD_SELL = "Sale",
-        HEAD_COST = "Cost (no wood)*",
         HEAD_WOODQTY = "Wood",
         HEAD_MAXPRICE = "Wood price",
         HEAD_PROFIT = "Profit",
@@ -48,12 +47,10 @@ DecorLumberProfitLocale = {
         HINT_LEARNED = "Is the recipe learned by this character (\"other\" — learned by another character on the account). Click to sort.",
         HINT_WOOD = "Which lumber the recipe consumes. Click to sort.",
         HINT_SELL = "Market price of the crafted item: per unit / total per craft. Click to sort.",
-        HINT_COST = "Cost of all reagents EXCEPT lumber (counted separately). Asterisk — some reagents have no fresh price. Click to sort.",
         HINT_WOODQTY = "Lumber units consumed per craft. Click to sort.",
         HINT_MAXPRICE = "Economically acceptable lumber PRICE for this recipe: (sale − other reagents cost) / lumber qty. Crafting is profitable while lumber purchase/market price is BELOW this value. Click to sort.",
         HINT_PROFIT = "Profit per craft: sale − all reagents, including lumber at market price. Click to sort.",
         HINT_SORT_GENERIC = "Sort by column \"%s\".",
-        --FOOTER_HINT = "* cost = sum(reagent price × qty) excluding lumber. |cffaaaaaaClick a header to sort, hover a row for details.|r",
 
         -- Значения ячеек
         CELL_YES = "|cff00ff00yes|r",
@@ -62,7 +59,6 @@ DecorLumberProfitLocale = {
         CELL_UNKNOWN = "|cffffaa00?|r",
         CELL_PROF_UNKNOWN = "|cffffaa00?|r",
         CELL_NO_AH = "|cffff5555no AH|r",
-        CELL_UNKNOWN_COST = "|cffffaa00unknown|r",
         CELL_DASH = "|cffff5555—|r",
         CELL_NO_PRICE = "|cffff5555no price|r",
 
@@ -169,7 +165,6 @@ DecorLumberProfitLocale = {
         HEAD_LEARNED = "Изучен",
         HEAD_WOOD = "Древесина",
         HEAD_SELL = "Продажа",
-        HEAD_COST = "Себест. без др.*",
         HEAD_WOODQTY = "Древ.",
         HEAD_MAXPRICE = "Цена др.",
         HEAD_PROFIT = "Прибыль",
@@ -178,12 +173,10 @@ DecorLumberProfitLocale = {
         HINT_LEARNED = "Изучен ли рецепт текущим персонажем («др.перс» — изучен другим персонажем аккаунта). Клик — сортировка.",
         HINT_WOOD = "Какая древесина расходуется в рецепте. Клик — сортировка.",
         HINT_SELL = "Цена готового предмета на аукционе: за штуку / всего за один крафт. Клик — сортировка.",
-        HINT_COST = "Себестоимость всех реагентов КРОМЕ древесины (она считается отдельно). Звёздочка — по части реагентов нет свежих цен. Клик — сортировка.",
         HINT_WOODQTY = "Сколько штук древесины уходит на один крафт. Клик — сортировка.",
         HINT_MAXPRICE = "Экономически допустимая ЦЕНА древесины для этого рецепта: (продажа − себестоимость прочих реагентов) / кол-во древесины. Крафт выгоден, пока закупочная/рыночная цена древесины НИЖЕ этого значения. Клик — сортировка.",
         HINT_PROFIT = "Прибыль с одного крафта: продажа − все реагенты, включая древесину по её рыночной цене. Клик — сортировка.",
         HINT_SORT_GENERIC = "Сортировка по колонке «%s».",
-        --FOOTER_HINT = "* себестоимость = сумма(цена реагента × кол-во) без стоимости древесины. |cffaaaaaaКлик по заголовку — сортировка, наведите на строку для деталей.|r",
 
         -- Значения ячеек
         CELL_YES = "|cff00ff00да|r",
@@ -192,7 +185,6 @@ DecorLumberProfitLocale = {
         CELL_UNKNOWN = "|cffffaa00?|r",
         CELL_PROF_UNKNOWN = "|cffffaa00?|r",
         CELL_NO_AH = "|cffff5555нет на АХ|r",
-        CELL_UNKNOWN_COST = "|cffffaa00неизв.|r",
         CELL_DASH = "|cffff5555—|r",
         CELL_NO_PRICE = "|cffff5555нет цены|r",
 

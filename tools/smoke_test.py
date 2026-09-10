@@ -94,12 +94,12 @@ def check(name, expr, expected):
     if got != expected: failures.append((name, got, expected))
     print('%s %-38s -> %s (want %s)' % (status, name, got, expected))
 
-# ==== FormatMoney ====
+# ==== FormatMoney (только золото, округление) ====
 lua.execute('DecorLumberProfitDB = {}')
-check('FormatMoney(123456789) g/s', lua.eval('DecorLumberProfitAuction.FormatMoney(123456789)'), '12345|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t 67|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:2:0|t')
-check('FormatMoney(500) s only', lua.eval('DecorLumberProfitAuction.FormatMoney(500)'), '5|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:2:0|t')
-check('FormatMoney(7) c only', lua.eval('DecorLumberProfitAuction.FormatMoney(7)'), '7|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:2:0|t')
-check('FormatMoney(-500) sign', lua.eval('DecorLumberProfitAuction.FormatMoney(-500)'), '-5|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:2:0|t')
+check('FormatMoney(123456789) rounds to gold', lua.eval('DecorLumberProfitAuction.FormatMoney(123456789)'), '12346|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t')
+check('FormatMoney(500) sub-gold -> 0g', lua.eval('DecorLumberProfitAuction.FormatMoney(500)'), '0|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t')
+check('FormatMoney(7) sub-gold -> 0g', lua.eval('DecorLumberProfitAuction.FormatMoney(7)'), '0|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t')
+check('FormatMoney(-500) -> 0g without minus', lua.eval('DecorLumberProfitAuction.FormatMoney(-500)'), '0|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t')
 check('FormatMoney(nil)', lua.eval('DecorLumberProfitAuction.FormatMoney(nil)'), '—')
 
 # ==== CollectPricesForRecipes: уникальность need + древесина ====

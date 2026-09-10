@@ -76,7 +76,6 @@ function Economy.CalculateRecipeEconomy(recipeData, auctionPrices)
         outputTotalPrice = outputTotalPrice,
         otherCost = otherCost,
         totalCost = totalCost,
-        costNoWood = totalCost - woodCost,
         woodCost = woodCost,
         woodQty = woodQty,
         woodItemID = woodItemID,
