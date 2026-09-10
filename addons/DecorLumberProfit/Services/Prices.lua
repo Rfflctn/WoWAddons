@@ -33,7 +33,7 @@ local function CfgNumber(key, fallback)
 end
 
 local function GetTTL() return CfgNumber("PRICE_TTL", 900) end
-local function GetDelay() return CfgNumber("QUERY_DELAY", 0.75) end
+local function GetDelay() return CfgNumber("QUERY_DELAY", 0.65) end
 local function GetQueueCap() return CfgNumber("MAX_QUEUE", 400) end
 
 -- Штамп последнего обновления цен (память + SavedVariables, переживает /reload)
@@ -180,6 +180,30 @@ local function SafeItemQuantity(itemKey)
     end
     return qty, num
 end
+-- Индекс browse-результатов [itemID] -> { minPrice, totalQuantity }: строится ОДИН раз
+-- на поколение результатов (инвалидация событиями АХ), дальше lookup O(1).
+-- Было: пересканирование всего GetBrowseResults() на каждый предмет -> O(N×M) в событиях.
+local browseIndex = nil
+local function InvalidateBrowseIndex() browseIndex = nil end
+local function GetBrowseIndex()
+    if browseIndex ~= nil then return browseIndex end
+    browseIndex = {}
+    if C_AuctionHouse and C_AuctionHouse.GetBrowseResults then
+        local ok, browse = pcall(C_AuctionHouse.GetBrowseResults)
+        if ok and type(browse) == "table" then
+            for _, br in ipairs(browse) do
+                if type(br) == "table" and br.itemKey and type(br.itemKey.itemID) == "number" then
+                    local p = tonumber(br.minPrice)
+                    local e = browseIndex[br.itemKey.itemID]
+                    if p and (not e or p < e.minPrice) then
+                        browseIndex[br.itemKey.itemID] = { minPrice = p, totalQuantity = br.totalQuantity }
+                    end
+                end
+            end
+        end
+    end
+    return browseIndex
+end
 -- Минимальная цена по первым N результатам (ограничиваем 15 для производительности).
 -- Все вызовы API за pcall: в Midnight методы могут кидать (taint/secret) — скан не должен рваться.
 local function GetMinPrice(count, getInfo, extractPrice)
@@ -222,21 +246,12 @@ local function UpdatePriceFromItem(itemKey, itemID)
         if not C_AuctionHouse.GetItemSearchResultInfo then return nil end
         return C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
     end, function(info) return info.buyoutAmount or info.minBid end)
-    -- Fallback: browse results (когда item-поиск пуст, но browse что-то вернул)
+    -- Fallback: browse results (когда item-поиск пуст, но browse что-то вернул).
+    -- Через индекс: O(1) на предмет вместо пересканирования всего списка.
     local browseQty = nil
-    if not minPrice and C_AuctionHouse.GetBrowseResults then
-        local browse = C_AuctionHouse.GetBrowseResults()
-        if browse then
-            for _, br in ipairs(browse) do
-                if br.itemKey and br.itemKey.itemID == itemID and br.minPrice then
-                    local p = tonumber(br.minPrice)
-                    if p and (not minPrice or p < minPrice) then
-                        minPrice = p
-                        if type(br.totalQuantity) == "number" then browseQty = br.totalQuantity end
-                    end
-                end
-            end
-        end
+    if not minPrice then
+        local br = GetBrowseIndex()[itemID]
+        if br then minPrice = br.minPrice; browseQty = br.totalQuantity end
     end
     if minPrice then
         if qty == nil then qty = browseQty end
@@ -506,6 +521,27 @@ local function NotifyPriceUpdate()
     end)
 end
 
+-- Коалесценция pending-прохода по browse-событиям: EXTRA_BROWSE_INFO_RECEIVED летит
+-- по одному на предмет — прямой проход на каждое событие стоил O(события × pending × browse-строки).
+-- Один проход на пачку (~0.1с) + индекс browse внутри = O(pending) на пачку.
+local browsePassQueued = false
+local function QueuePendingBrowsePass()
+    if browsePassQueued then return end
+    browsePassQueued = true
+    C_Timer.After(0.1, function()
+        browsePassQueued = false
+        -- Удаление текущего ключа при обходе pairs безопасно: ClearPending только
+        -- nil-ит существующие ключи pending, новых не добавляет.
+        for id in pairs(pending) do
+            Auction.TryUpdateFromCache(id)
+            if priceCache[id] and priceCache[id].price then
+                ClearPending(id)
+            end
+        end
+        NotifyPriceUpdate()
+    end)
+end
+
 -- ==== Обработчики событий аукциона ====
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
@@ -545,13 +581,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             NotifyPriceUpdate()
         end
     elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "EXTRA_BROWSE_INFO_RECEIVED" then
-        for id in pairs(pending) do
-            Auction.TryUpdateFromCache(id)
-            if priceCache[id] and priceCache[id].price then
-                ClearPending(id)
-            end
-        end
-        NotifyPriceUpdate()
+        -- Результаты browse изменились: индекс протух; pending-проход — коалеснутый
+        InvalidateBrowseIndex()
+        QueuePendingBrowsePass()
     elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
         -- Продолжаем очередь
         lastQueryTime = 0
@@ -571,10 +603,24 @@ function Auction.CollectPricesForRecipes(recipes)
     local map = {}
     local need = {}
     local handled = {}
+    -- Древесина на аукционе не продаётся: запросы по ней не отправляем вообще.
+    -- Только кэш-прочтение для колонки «цена др.»; экономика держится на maxWoodPrice.
+    local cfg = DecorLumberProfitConfig
+    local woodSet = (cfg and cfg.WOOD_IDS_SET) or {}
+    if cfg and cfg.WOOD_IDS_SET == nil and cfg.WOOD_ITEM_IDS then
+        woodSet = {}
+        for _, id in ipairs(cfg.WOOD_ITEM_IDS) do woodSet[id] = true end
+    end
 
     local function Collect(id)
         if handled[id] then return end
         handled[id] = true
+        if woodSet[id] then
+            -- cache-only: в need (поиск по АХ) не попадает никогда
+            local p = Auction.GetCachedPrice(id)
+            if p then map[id] = p end
+            return
+        end
         -- TTL-корректно: свежесть решает HasFreshPrice, а не наличие записи.
         -- Раньше протухшая цена в памяти считалась свежей (GetCachedPrice без TTL),
         -- а протухший noauction вообще никогда не перезапрашивался.
@@ -593,7 +639,7 @@ function Auction.CollectPricesForRecipes(recipes)
             if type(r.itemID) == "number" then Collect(r.itemID) end
         end
     end
-    -- Древесина, реально используемая рецептами (для колонки «цена др.» и расчёта maxWoodPrice)
+    -- Древесина, реально используемая рецептами (колонка «цена др.»; cache-only, АХ не ищется)
     local woodIDs = DecorLumberProfitConfig.WOOD_ITEM_IDS or (DecorLumberProfitConfig.WOOD_ITEM_ID and { DecorLumberProfitConfig.WOOD_ITEM_ID } or {})
     for _, woodID in ipairs(woodIDs) do
         local used = false

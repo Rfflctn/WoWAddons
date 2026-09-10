@@ -14,7 +14,7 @@ local seen, dups = {}, 0
 for _, id in ipairs(NEED) do if seen[id] then dups = dups + 1 end seen[id] = true end
 NEED_COUNT, NEED_DUPS = #NEED, dups
 ''')
-    check('need count (3 uniq: 999002, 999001, 256963)', 'NEED_COUNT', '3')
+    check('need count (2 uniq: 999002, 999001 — wood cache-only, не ищется)', 'NEED_COUNT', '2')
     check('need has no duplicates', 'NEED_DUPS', '0')
     # Self-contained: fill the cache explicitly (was implicitly filled by the
     # economy suite before the split - suites must not depend on each other).

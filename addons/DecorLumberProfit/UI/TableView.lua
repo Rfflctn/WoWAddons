@@ -237,15 +237,12 @@ function UI.PriceTimeSuffix()
     return TL("ST_PRICES_TIME", timestr)
 end
 
--- Формат ячейки конкуренции: "qty (lots)" если известны оба, иначе одно число.
+-- Формат ячейки конкуренции: только суммарно штук (лоты не показываем).
 -- Чистая функция (тесты). qty/listings могут быть nil — тогда nil (звать FillRow решает dash).
+-- Параметр listings оставлен для совместимости вызовов, но игнорируется.
 function UI.FormatAuctionQuantity(qty, listings)
     if qty == nil and listings == nil then return nil end
     qty = tonumber(qty) or 0
-    listings = tonumber(listings)
-    if listings and listings > 0 and listings ~= qty then
-        return string.format("%d (%d)", qty, listings)
-    end
     return tostring(qty)
 end
 

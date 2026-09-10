@@ -12,7 +12,7 @@ DecorLumberProfitConfig.SCAN = {
 
 -- Настройки аукциона
 DecorLumberProfitConfig.AUCTION = {
-    QUERY_DELAY = 0.8, -- ~75 запросов/мин, запас под лимит Blizzard 100/мин
+    QUERY_DELAY = 0.65, -- ~92 запроса/мин; лимит Blizzard 100/мин = 0.6с между запросами
     PRICE_TTL = 900,
     MAX_QUEUE = 500,   -- размер активной очереди; излишек копится в overflow и подгружается сам
 }
