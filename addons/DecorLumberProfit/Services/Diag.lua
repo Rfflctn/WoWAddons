@@ -127,8 +127,8 @@ local function ProbePrices()
         if ok and type(qi) == "table" then
             local active = (qi.queue or 0) + (qi.pending or 0)
             return { key = "prices", state = active == 0 and "OK" or "WARN",
-                detail = string.format("queue=%d overflow=%d pending=%d cached-note:see '/dlp debug queue'",
-                    qi.queue or 0, qi.overflow or 0, qi.pending or 0) }
+                detail = string.format("realm=%s queue=%d overflow=%d pending=%d cached-note:see '/dlp debug queue'",
+                    tostring(qi.realmName or qi.realm or "?"), qi.queue or 0, qi.overflow or 0, qi.pending or 0) }
         end
     end
     return { key = "prices", state = "UNKNOWN", detail = "no queue introspection" }
@@ -137,10 +137,20 @@ end
 local function ProbeDB()
     local db = _G.DecorLumberProfitDB
     if not db then return { key = "db", state = "WARN", detail = "DB not loaded yet (ADDON_LOADED pending)" } end
+    local realms, prices, owned = 0, 0, 0
+    for realmKey, bucket in pairs(db.priceCache or {}) do
+        if type(bucket) == "table" then
+            realms = realms + 1
+            for _ in pairs(bucket) do prices = prices + 1 end
+        end
+        if db.ownedAuctions and type(db.ownedAuctions[realmKey]) == "table" then
+            for _ in pairs(db.ownedAuctions[realmKey]) do owned = owned + 1 end
+        end
+    end
     return { key = "db", state = "OK",
-        detail = string.format("schema=%s recipes=%d prices=%d known=%d",
+        detail = string.format("schema=%s realms=%d prices=%d ownedSnapshots=%d known=%d",
             tostring(db.schemaVersion or 1),
-            CountTable(db.recipes), CountTable(db.priceCache), CountTable(db.knownRecipes)) }
+            realms, prices, owned, CountTable(db.recipes), CountTable(db.knownRecipes)) }
 end
 
 local function ProbeErrors()

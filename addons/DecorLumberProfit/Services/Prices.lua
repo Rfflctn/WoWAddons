@@ -6,7 +6,9 @@
 DecorLumberProfitPrices = {}
 local Auction = DecorLumberProfitPrices
 
-local priceCache = {} -- [itemID] = { price=copper, timestamp=time(), source=..., noauction? }
+local priceCache = {} -- active realm: [itemID] = { price=copper, timestamp=time(), ... }
+local activeRealmKey = nil
+local activeRealmName = nil
 local pending = {}    -- [itemID] = true (ожидает ответа)
 local queue = {}      -- список itemID на запрос
 local overflow = {}   -- излишек сверх MAX_QUEUE, подгружается по мере обработки
@@ -20,6 +22,8 @@ local overflowHead = 1 -- голова overflow (Этап 7: O(1) вместо t
 local sentAt = {}     -- [itemID] = GetTime() отправки (Этап 7: батч-sweep вместо N C_Timer.After)
 local stats = { requested = 0, resolved = 0 } -- прогресс очереди для UI/status (Этап 7)
 local lastPriceUpdate = nil -- timestamp time() последнего успешного обновления цены (задача: время в статусе)
+local ownedRefreshQueued = false
+local NotifyPriceUpdate
 local MAX_ATTEMPTS = 3
 local RESOLVE_DELAY = 1.5
 
@@ -36,27 +40,95 @@ local function GetTTL() return CfgNumber("PRICE_TTL", 3600) end
 local function GetDelay() return CfgNumber("QUERY_DELAY", 0.65) end
 local function GetQueueCap() return CfgNumber("MAX_QUEUE", 400) end
 
+local function RealmContext()
+    local key, name
+    if _G.GetNormalizedRealmName then
+        local ok, value = pcall(_G.GetNormalizedRealmName)
+        if ok and type(value) == "string" and value ~= "" then key = value end
+    end
+    if _G.GetRealmName then
+        local ok, value = pcall(_G.GetRealmName)
+        if ok and type(value) == "string" and value ~= "" then name = value end
+    end
+    name = name or key
+    if not key and name then key = name:gsub("[%s%p]", ""):lower() end
+    if not key or key == "" then return nil, name end
+    return key, name or key
+end
+
+local function ActivateRealm()
+    local key, name = RealmContext()
+    if not key then return nil end
+    if activeRealmKey and activeRealmKey ~= key and Auction.ClearQueue then
+        Auction.ClearQueue()
+    end
+    activeRealmKey, activeRealmName = key, name
+    local Store = _G.DecorLumberProfitStore
+    if Store and Store.MigrateRealmData then Store.MigrateRealmData(key, name) end
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
+    DecorLumberProfitDB.priceCache[key] = DecorLumberProfitDB.priceCache[key] or {}
+    DecorLumberProfitDB.realmMeta = DecorLumberProfitDB.realmMeta or {}
+    DecorLumberProfitDB.realmMeta[key] = DecorLumberProfitDB.realmMeta[key] or {}
+    DecorLumberProfitDB.realmMeta[key].name = name or DecorLumberProfitDB.realmMeta[key].name or key
+    DecorLumberProfitDB.realmMeta[key].lastSeen = Now()
+    DecorLumberProfitDB.priceUpdatedAtByRealm = DecorLumberProfitDB.priceUpdatedAtByRealm or {}
+    priceCache = DecorLumberProfitDB.priceCache[key]
+    lastPriceUpdate = DecorLumberProfitDB.priceUpdatedAtByRealm[key]
+    return key
+end
+
+function Auction.InitializeRealm()
+    return ActivateRealm()
+end
+
+local function EnsureRealm()
+    local key = RealmContext()
+    if key and key ~= activeRealmKey then ActivateRealm() end
+    return activeRealmKey
+end
+
+local function RealmBucket(realmKey)
+    realmKey = realmKey or EnsureRealm()
+    if not realmKey then return nil end
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
+    DecorLumberProfitDB.priceCache[realmKey] = DecorLumberProfitDB.priceCache[realmKey] or {}
+    return DecorLumberProfitDB.priceCache[realmKey]
+end
+
 -- Штамп последнего обновления цен (память + SavedVariables, переживает /reload)
 local function TouchPriceUpdate()
+    local realmKey = EnsureRealm()
+    if not realmKey then return end
     lastPriceUpdate = Now()
     DecorLumberProfitDB = DecorLumberProfitDB or {}
-    DecorLumberProfitDB.priceUpdatedAt = lastPriceUpdate
+    DecorLumberProfitDB.priceUpdatedAtByRealm = DecorLumberProfitDB.priceUpdatedAtByRealm or {}
+    DecorLumberProfitDB.priceUpdatedAtByRealm[realmKey] = lastPriceUpdate
 end
 
 -- Единая точка записи в кэш: память + SavedVariables
 local function CacheEntry(itemID, entry)
+    if not EnsureRealm() then return end
     priceCache[itemID] = entry
     DecorLumberProfitDB = DecorLumberProfitDB or {}
     DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
-    DecorLumberProfitDB.priceCache[itemID] = entry
+    DecorLumberProfitDB.priceCache[activeRealmKey] = DecorLumberProfitDB.priceCache[activeRealmKey] or {}
+    DecorLumberProfitDB.priceCache[activeRealmKey][itemID] = entry
     TouchPriceUpdate()
 end
 
 -- Время последнего успешного обновления цен (timestamp time()) или nil («ещё не обновляли»).
 -- Фолбэк на SavedVariables — переживает /reload даже до первого SetPrice в сессии.
-function Auction.GetLastPriceUpdate()
+function Auction.GetLastPriceUpdate(realmKey)
+    if realmKey and realmKey ~= activeRealmKey then
+        local saved = DecorLumberProfitDB and DecorLumberProfitDB.priceUpdatedAtByRealm
+        return saved and saved[realmKey] or nil
+    end
+    EnsureRealm()
     if lastPriceUpdate then return lastPriceUpdate end
-    local saved = DecorLumberProfitDB and DecorLumberProfitDB.priceUpdatedAt
+    local saved = DecorLumberProfitDB and DecorLumberProfitDB.priceUpdatedAtByRealm
+    saved = saved and activeRealmKey and saved[activeRealmKey] or nil
     if type(saved) == "number" and saved > 0 then
         lastPriceUpdate = saved
         return saved
@@ -76,15 +148,23 @@ function Auction.FormatMoney(copper)
 end
 
 -- ==== Кэш цен ====
-function Auction.GetCachedPrice(itemID)
+function Auction.GetCachedPrice(itemID, realmKey)
     if type(itemID) ~= "number" then return nil end
-    local entry = priceCache[itemID]
+    local entry
+    if realmKey then
+        local bucket = RealmBucket(realmKey)
+        entry = bucket and bucket[itemID]
+    else
+        EnsureRealm()
+        entry = priceCache[itemID]
+    end
     if not entry then
         -- Пробуем SavedVariables (переживает /reload; TTL x2 — компромисс между свежестью и запросами)
-        local saved = DecorLumberProfitDB and DecorLumberProfitDB.priceCache and DecorLumberProfitDB.priceCache[itemID]
+        local bucket = RealmBucket(realmKey)
+        local saved = bucket and bucket[itemID]
         if saved then
             if IsExpired(saved, GetTTL() * 2) then return nil end
-            priceCache[itemID] = saved
+            if not realmKey or realmKey == activeRealmKey then priceCache[itemID] = saved end
             return saved.price, saved
         end
         return nil
@@ -94,6 +174,7 @@ end
 
 function Auction.SetPrice(itemID, price, source, qty, listings)
     if type(itemID) ~= "number" or type(price) ~= "number" then return end
+    if not EnsureRealm() then return end
     local old = priceCache[itemID]
     if qty == nil and old then qty = old.qty end
     if listings == nil and old then listings = old.listings end
@@ -105,9 +186,11 @@ end
 -- Возвращает qty (суммарно штук), listings (число лотов), entry. nil — ещё не сканировали.
 function Auction.GetCachedQuantity(itemID)
     if type(itemID) ~= "number" then return nil end
+    EnsureRealm()
     local entry = priceCache[itemID]
     if not entry then
-        local saved = DecorLumberProfitDB and DecorLumberProfitDB.priceCache and DecorLumberProfitDB.priceCache[itemID]
+        local bucket = RealmBucket()
+        local saved = bucket and bucket[itemID]
         if saved then
             if IsExpired(saved, GetTTL() * 2) then return nil end
             priceCache[itemID] = saved
@@ -128,19 +211,183 @@ function Auction.GetAuctionInfo(itemID)
     return { price = price, qty = qty, listings = listings, entry = entry }
 end
 
-function Auction.ClearPriceCache()
+local function CurrentCharacter()
+    if _G.UnitName then
+        local ok, name = pcall(_G.UnitName, "player")
+        if ok and type(name) == "string" and name ~= "" then return name end
+    end
+    return "player"
+end
+
+local function OwnedRoot(realmKey)
+    realmKey = realmKey or EnsureRealm()
+    if not realmKey then return nil end
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.ownedAuctions = DecorLumberProfitDB.ownedAuctions or {}
+    DecorLumberProfitDB.ownedAuctions[realmKey] = DecorLumberProfitDB.ownedAuctions[realmKey] or {}
+    return DecorLumberProfitDB.ownedAuctions[realmKey]
+end
+
+local function OwnedStats(itemID, realmKey)
+    local root = OwnedRoot(realmKey)
+    if not root then return nil, nil, false, nil end
+    local qty, listings, latestAt = 0, 0, nil
+    local hasData = false
+    for _, snapshot in pairs(root) do
+        if type(snapshot) == "table" and type(snapshot.updatedAt) == "number" then
+            hasData = true
+            if not latestAt or snapshot.updatedAt > latestAt then latestAt = snapshot.updatedAt end
+            local item = snapshot.items and snapshot.items[itemID]
+            if item then
+                qty = qty + (tonumber(item.quantity) or 0)
+                listings = listings + (tonumber(item.listings) or 0)
+            end
+        end
+    end
+    if not hasData then return nil, nil, false, nil end
+    return qty, listings, true, latestAt
+end
+
+-- Сводка по всем известным реалмам для тултипа предмета. В отличие от
+-- GetCachedPrice не скрывает старые записи: stale=true позволяет показать
+-- пользователю дату, но не выдаёт устаревшее значение экономике.
+function Auction.GetRealmAuctionInfo(itemID)
+    if type(itemID) ~= "number" then return {} end
+    local db = _G.DecorLumberProfitDB
+    if not db then return {} end
+    local realms = {}
+    local seen = {}
+    local function AddRealm(realmKey)
+        if type(realmKey) ~= "string" or seen[realmKey] then return end
+        seen[realmKey] = true
+        local bucket = db.priceCache and db.priceCache[realmKey]
+        local entry = type(bucket) == "table" and bucket[itemID] or nil
+        local qty, listings, ownKnown, ownUpdatedAt = OwnedStats(itemID, realmKey)
+        if not entry and not ownKnown then return end
+        local meta = db.realmMeta and db.realmMeta[realmKey]
+        local price = entry and entry.price or nil
+        realms[#realms + 1] = {
+            key = realmKey,
+            name = (type(meta) == "table" and meta.name) or realmKey,
+            price = price,
+            qty = entry and entry.qty or nil,
+            listings = entry and entry.listings or nil,
+            ownQty = qty,
+            ownListings = listings,
+            ownUpdatedAt = ownUpdatedAt,
+            timestamp = entry and entry.timestamp or nil,
+            stale = entry and IsExpired(entry, GetTTL()) or false,
+        }
+    end
+    for realmKey, bucket in pairs(db.priceCache or {}) do
+        if type(bucket) == "table" and bucket[itemID] then AddRealm(realmKey) end
+    end
+    for realmKey in pairs(db.ownedAuctions or {}) do AddRealm(realmKey) end
+    table.sort(realms, function(a, b) return tostring(a.name) < tostring(b.name) end)
+    return realms
+end
+
+function Auction.GetAuctionStats(itemID, realmKey)
+    if type(itemID) ~= "number" then return nil end
+    local bucket = RealmBucket(realmKey)
+    local entry = bucket and bucket[itemID]
+    local qty = entry and entry.qty or nil
+    local listings = entry and entry.listings or nil
+    local ownQty, ownListings, ownKnown, ownUpdatedAt = OwnedStats(itemID, realmKey)
+    if not entry and not ownKnown then return nil end
+    return {
+        price = entry and entry.price or nil,
+        qty = qty,
+        listings = listings,
+        ownQty = ownQty,
+        ownListings = ownListings,
+        ownKnown = ownKnown,
+        ownUpdatedAt = ownUpdatedAt,
+        timestamp = entry and entry.timestamp or nil,
+        stale = entry and IsExpired(entry, GetTTL()) or false,
+    }
+end
+
+function Auction.RefreshOwnedAuctions()
+    local realmKey = EnsureRealm()
+    if not realmKey or not C_AuctionHouse then return false end
+    local rows = nil
+    if C_AuctionHouse.GetOwnedAuctions then
+        local ok, value = pcall(C_AuctionHouse.GetOwnedAuctions)
+        if ok and type(value) == "table" then rows = value end
+    end
+    if not rows and C_AuctionHouse.GetNumOwnedAuctions and C_AuctionHouse.GetOwnedAuctionInfo then
+        local okCount, count = pcall(C_AuctionHouse.GetNumOwnedAuctions)
+        if okCount and type(count) == "number" then
+            rows = {}
+            for i = 1, count do
+                local okInfo, info = pcall(C_AuctionHouse.GetOwnedAuctionInfo, i)
+                if okInfo and info then rows[#rows + 1] = info end
+            end
+        end
+    end
+    if type(rows) ~= "table" then
+        if DecorLumberProfit and DecorLumberProfit.Log then
+            DecorLumberProfit.Log("WARN", "Prices", "Owned auction API unavailable")
+        end
+        return false
+    end
+    local items = {}
+    for _, info in ipairs(rows) do
+        pcall(function()
+            local itemID = info.itemKey and tonumber(info.itemKey.itemID)
+            local quantity = tonumber(info.quantity)
+            if type(itemID) ~= "number" or itemID <= 0 then return end
+            local item = items[itemID]
+            if not item then item = { quantity = 0, listings = 0 }; items[itemID] = item end
+            item.quantity = item.quantity + (quantity or 0)
+            item.listings = item.listings + 1
+        end)
+    end
+    local root = OwnedRoot(realmKey)
+    root[CurrentCharacter()] = { updatedAt = Now(), items = items }
+    NotifyPriceUpdate()
+    return true
+end
+
+local function QueueOwnedRefresh()
+    if ownedRefreshQueued then return end
+    ownedRefreshQueued = true
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0.2, function()
+            ownedRefreshQueued = false
+            Auction.RefreshOwnedAuctions()
+        end)
+    else
+        ownedRefreshQueued = false
+        Auction.RefreshOwnedAuctions()
+    end
+end
+
+function Auction.ClearPriceCache(realmKey)
+    local requestedRealm = realmKey
+    realmKey = realmKey or EnsureRealm()
+    if not realmKey then return end
     priceCache = {}
     lastPriceUpdate = nil
     if DecorLumberProfitDB then
-        DecorLumberProfitDB.priceCache = {}
-        DecorLumberProfitDB.priceUpdatedAt = nil
+        DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
+        DecorLumberProfitDB.priceUpdatedAtByRealm = DecorLumberProfitDB.priceUpdatedAtByRealm or {}
+        if requestedRealm then
+            DecorLumberProfitDB.priceCache[realmKey] = {}
+            DecorLumberProfitDB.priceUpdatedAtByRealm[realmKey] = nil
+        else
+            DecorLumberProfitDB.priceCache = {}
+            DecorLumberProfitDB.priceUpdatedAtByRealm = {}
+        end
     end
 end
 
 function Auction.IsPending(itemID) return pending[itemID] end
 
 function Auction.HasFreshPrice(itemID)
-    local entry = priceCache[itemID] or (DecorLumberProfitDB and DecorLumberProfitDB.priceCache and DecorLumberProfitDB.priceCache[itemID])
+    EnsureRealm()
+    local entry = priceCache[itemID] or (RealmBucket() and RealmBucket()[itemID])
     if not entry then return false end
     if entry.noauction then
         return (entry.timestamp ~= nil) and (Now() - entry.timestamp) <= GetTTL()
@@ -510,7 +757,7 @@ end
 
 -- Coalesce UI-обновлений (Этап 7): события АХ сыплются пачками, таблица — максимум ~3/сек
 local uiDirty = false
-local function NotifyPriceUpdate()
+NotifyPriceUpdate = function()
     if uiDirty then return end
     uiDirty = true
     C_Timer.After(0.3, function()
@@ -551,9 +798,13 @@ eventFrame:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
 eventFrame:RegisterEvent("AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED")
 eventFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
 eventFrame:RegisterEvent("EXTRA_BROWSE_INFO_RECEIVED")
+eventFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
+eventFrame:RegisterEvent("OWNED_AUCTIONS_UPDATED")
 
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
-    if event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_RECEIVED" then
+    if event == "AUCTION_HOUSE_SHOW" or event == "OWNED_AUCTIONS_UPDATED" then
+        QueueOwnedRefresh()
+    elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_RECEIVED" then
         local itemID = arg1
         if type(itemID) == "number" then
             Auction.TryUpdateFromCache(itemID)
@@ -678,6 +929,8 @@ function Auction.GetQueueInfo()
     for _ in pairs(attempts) do a = a + 1 end
     for _ in pairs(droppedIDs) do d = d + 1 end
     return {
+        realm = activeRealmKey,
+        realmName = activeRealmName,
         queue = #queue,
         overflow = OverflowSize(),
         pending = p,

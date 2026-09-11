@@ -33,3 +33,28 @@ DecorLumberProfitUI.LayoutColumns()
     check('colwidth scale 1', 'TV_W1', '150')
     check('colwidth scale 0.5', 'TV_W2', '75')
     check('colwidth min 30 clamps 22->30', 'TV_W3', '30')
+    exec_(r'''
+TV_HAS_MINE = DecorLumberProfitUI.IsColumnVisible("ahMineQty")
+TV_HIDE_MINE = DecorLumberProfitUI.SetColumnVisible("ahMineQty", false)
+TV_MINE_HIDDEN = DecorLumberProfitUI.IsColumnVisible("ahMineQty")
+DecorLumberProfitUI.SetColumnVisible("ahMineQty", true)
+''')
+    check('mine column exists and visible', 'tostring(TV_HAS_MINE)', 'true')
+    check('mine column can be hidden', 'tostring(TV_HIDE_MINE)', 'true')
+    check('mine column hidden state', 'tostring(TV_MINE_HIDDEN)', 'false')
+    # multirealm-переключатель: по умолчанию off, set персистит в DB.settings
+    exec_(r'''
+DecorLumberProfitDB = DecorLumberProfitDB or { settings = {} }
+DecorLumberProfitDB.settings = DecorLumberProfitDB.settings or {}
+DecorLumberProfitConfig.MULTI_REALM = false
+TV_MR_DEFAULT = DecorLumberProfitUI.IsMultiRealmEnabled()
+DecorLumberProfitUI.SetMultiRealm(true)
+TV_MR_ON = DecorLumberProfitUI.IsMultiRealmEnabled()
+TV_MR_SAVED = DecorLumberProfitDB.settings.multiRealm
+DecorLumberProfitUI.SetMultiRealm(false)
+TV_MR_OFF = DecorLumberProfitUI.IsMultiRealmEnabled()
+''')
+    check('multirealm default off', 'tostring(TV_MR_DEFAULT)', 'false')
+    check('multirealm set on', 'tostring(TV_MR_ON)', 'true')
+    check('multirealm persisted', 'tostring(TV_MR_SAVED)', 'true')
+    check('multirealm set off', 'tostring(TV_MR_OFF)', 'false')

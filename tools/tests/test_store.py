@@ -16,11 +16,18 @@ DecorLumberProfitCharDB = nil
 DecorLumberProfitStore.Upgrade()
 ''')
     check('upgrade creates DB', 'tostring(DecorLumberProfitDB ~= nil)', 'true')
-    check('upgrade schema stamped', 'DecorLumberProfitDB.schemaVersion', '1')
+    check('upgrade schema stamped', 'DecorLumberProfitDB.schemaVersion', '2')
     check('upgrade recipes table', 'tostring(DecorLumberProfitDB.recipes ~= nil)', 'true')
     check('upgrade known table', 'tostring(DecorLumberProfitDB.knownRecipes ~= nil)', 'true')
     check('upgrade settings table', 'tostring(DecorLumberProfitDB.settings ~= nil)', 'true')
     check('upgrade chardb seen', 'tostring(DecorLumberProfitCharDB.seenRecipes ~= nil)', 'true')
+    exec_(r'''
+DecorLumberProfitDB.priceCache = { [700100] = { price = 12345, timestamp = 99 } }
+DecorLumberProfitDB.priceUpdatedAt = 99
+DecorLumberProfitStore.Upgrade()
+''')
+    check('legacy flat price migrated', 'DecorLumberProfitDB.priceCache.TestRealm[700100].price', '12345')
+    check('legacy update time migrated', 'DecorLumberProfitDB.priceUpdatedAtByRealm.TestRealm', '99')
 
     # ---- legacy adoption (v1.4.0 rename) ----
     exec_(r'''
@@ -87,6 +94,19 @@ DecorLumberProfitStore.Upgrade()
 DecorLumberProfitDB.settings.scan = nil
 DecorLumberProfitConfig.SCAN.ENABLE_BRUTEFORCE = true
 DecorLumberProfitConfig.SCAN.MAX_RESULTS = 500
+DecorLumberProfitDB.settings.multiRealm = true
+DecorLumberProfitConfig.MULTI_REALM = false
+DecorLumberProfitStore.Upgrade()
+MR_AFTER_UPGRADE = DecorLumberProfitConfig.MULTI_REALM
+DecorLumberProfitDB.settings.multiRealm = false
+DecorLumberProfitStore.Upgrade()
+MR_AFTER_OFF = DecorLumberProfitConfig.MULTI_REALM
+''')
+    check('upgrade applies saved multirealm on', 'tostring(MR_AFTER_UPGRADE)', 'true')
+    check('upgrade applies saved multirealm off', 'tostring(MR_AFTER_OFF)', 'false')
+    exec_(r'''
+DecorLumberProfitConfig.SCAN.ENABLE_BRUTEFORCE = true
+DecorLumberProfitConfig.SCAN.MAX_RESULTS = 500
 ''')
 
     # ---- LoadSavedRecipes переживает битые записи ----
@@ -100,7 +120,7 @@ LOAD2 = DecorLumberProfitStore.LoadSavedRecipes()
 
     # ---- HealthCheck ----
     check('store health ok', 'tostring(DecorLumberProfitStore.HealthCheck().ok)', 'true')
-    check('store health schema', 'DecorLumberProfitStore.HealthCheck().schema', '1')
+    check('store health schema', 'DecorLumberProfitStore.HealthCheck().schema', '2')
 
     # ---- EnforceCap: 1005 timestamped + 3 untimestamped -> keep 1000 + 3 ----
     exec_(r'''

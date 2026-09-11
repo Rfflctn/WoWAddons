@@ -1,6 +1,5 @@
 -- Services/Store.lua | DecorLumberProfit | Retail 12.1.0
--- Персистентность (Этап 5): account-wide база рецептов, knownRecipes, миграции схемы.
--- priceCache владеет Prices (Auction.lua), settings — UI; сюда не тянем (см. план).
+-- Персистентность: account-wide база рецептов, realm-scoped цены и снимки АХ.
 -- Все функции — через точку (без self). Core держит тонкие :-врапперы.
 -- WoW Lua 5.1: no goto, no //, no bitwise ops. No WoW calls at top level.
 
@@ -23,6 +22,24 @@ local function CurrentPlayer()
         if ok and type(name) == "string" and name ~= "" then return name end
     end
     return "player"
+end
+
+local function RealmContext()
+    local normalized, display
+    if _G.GetNormalizedRealmName then
+        local ok, value = pcall(_G.GetNormalizedRealmName)
+        if ok and type(value) == "string" and value ~= "" then normalized = value end
+    end
+    if _G.GetRealmName then
+        local ok, value = pcall(_G.GetRealmName)
+        if ok and type(value) == "string" and value ~= "" then display = value end
+    end
+    display = display or normalized
+    if not normalized and display then
+        normalized = display:gsub("[%s%p]", ""):lower()
+    end
+    if not normalized or normalized == "" then return nil, display end
+    return normalized, display or normalized
 end
 
 -- Есть ли хоть один персонаж, знающий рецепт (значения learnedBy — явные boolean)
@@ -56,11 +73,46 @@ end
 local function EnsureTables()
     DecorLumberProfitDB = DecorLumberProfitDB or {}
     DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
+    DecorLumberProfitDB.realmMeta = DecorLumberProfitDB.realmMeta or {}
+    DecorLumberProfitDB.ownedAuctions = DecorLumberProfitDB.ownedAuctions or {}
     DecorLumberProfitDB.knownRecipes = DecorLumberProfitDB.knownRecipes or {}
     DecorLumberProfitDB.recipes = DecorLumberProfitDB.recipes or {}
     DecorLumberProfitDB.settings = DecorLumberProfitDB.settings or {}
     DecorLumberProfitCharDB = DecorLumberProfitCharDB or {}
     DecorLumberProfitCharDB.seenRecipes = DecorLumberProfitCharDB.seenRecipes or {}
+end
+
+-- Переносит старый плоский priceCache[itemID] в bucket текущего реалма.
+-- До PLAYER_LOGIN имя реалма может быть недоступно, поэтому миграция идемпотентна
+-- и повторяется из Prices.InitializeRealm(). Старые данные нельзя достоверно
+-- распределить по нескольким реалмам — относим их к текущему.
+function Store.MigrateRealmData(realmKey, realmName)
+    local db = _G.DecorLumberProfitDB
+    if not db or not realmKey or realmKey == "" then return false end
+    db.priceCache = db.priceCache or {}
+    db.realmMeta = db.realmMeta or {}
+    db.ownedAuctions = db.ownedAuctions or {}
+    local bucket = db.priceCache[realmKey]
+    if type(bucket) ~= "table" then bucket = {}; db.priceCache[realmKey] = bucket end
+    for itemID, entry in pairs(db.priceCache) do
+        if type(itemID) == "number" and type(entry) == "table" then
+            if bucket[itemID] == nil then bucket[itemID] = entry end
+            db.priceCache[itemID] = nil
+        end
+    end
+    if type(db.priceUpdatedAt) == "number" then
+        db.priceUpdatedAtByRealm = db.priceUpdatedAtByRealm or {}
+        if db.priceUpdatedAtByRealm[realmKey] == nil then
+            db.priceUpdatedAtByRealm[realmKey] = db.priceUpdatedAt
+        end
+        db.priceUpdatedAt = nil
+    end
+    db.priceUpdatedAtByRealm = db.priceUpdatedAtByRealm or {}
+    db.realmMeta[realmKey] = db.realmMeta[realmKey] or {}
+    db.realmMeta[realmKey].name = realmName or db.realmMeta[realmKey].name or realmKey
+    db.realmMeta[realmKey].lastSeen = Now()
+    db.realmMigrationPending = nil
+    return true
 end
 
 -- Режет таблицу сверх капа: только записи С меткой savedAt (самые старые первыми);
@@ -112,6 +164,12 @@ end
 function Store.Upgrade()
     AdoptLegacyNames()
     EnsureTables()
+    local realmKey, realmName = RealmContext()
+    if realmKey then
+        Store.MigrateRealmData(realmKey, realmName)
+    else
+        DecorLumberProfitDB.realmMigrationPending = true
+    end
     Store.PurgeUnsellable() -- чистка сейвов от BoP/Warband-выходов (см. ItemInfo)
     local Addon = _G.DecorLumberProfit
     local target = (Addon and Addon.DB_SCHEMA) or 1
@@ -127,6 +185,12 @@ function Store.Upgrade()
     if saved.bruteforce ~= nil then sc.ENABLE_BRUTEFORCE = saved.bruteforce end
     if type(saved.maxscan) == "number" then sc.MAX_RESULTS = saved.maxscan end
     DecorLumberProfitConfig.SCAN = sc
+    -- Мультиреалм-отображение (переживает /reload; сбор данных не гейтится)
+    if DecorLumberProfitDB.settings.multiRealm ~= nil then
+        DecorLumberProfitConfig.MULTI_REALM = DecorLumberProfitDB.settings.multiRealm and true or false
+    elseif DecorLumberProfitConfig.MULTI_REALM == nil then
+        DecorLumberProfitConfig.MULTI_REALM = false
+    end
     DecorLumberProfitDB.schemaVersion = target
     _G.DecorLumberProfitDB = DecorLumberProfitDB
     _G.DecorLumberProfitCharDB = DecorLumberProfitCharDB

@@ -17,6 +17,12 @@ DecorLumberProfitConfig.AUCTION = {
     MAX_QUEUE = 500,   -- размер активной очереди; излишек копится в overflow и подгружается сам
 }
 
+-- Мультиреалм: показывать ли в тултипе данные со всех известных реалмов.
+-- По умолчанию выключен (версия для масс — один мир); включается командой
+-- /dlp multirealm on (персист в DB.settings.multiRealm, переживает /reload).
+-- Сбор данных при этом не останавливается — гейтится только отображение.
+DecorLumberProfitConfig.MULTI_REALM = false
+
 -- Настройки UI
 DecorLumberProfitConfig.UI = {
     WIDTH  = 950,
@@ -42,14 +48,21 @@ DecorLumberProfitConfig.API_CHECKLIST = {
         "C_AuctionHouse.GetItemSearchResultsQuantity(itemKey) / GetItemSearchResultInfo",
         "C_AuctionHouse.GetCommoditySearchResultsQuantity(itemID) / GetCommoditySearchResultInfo",
         "C_AuctionHouse.GetMaxItemSearchResultBuyout / GetMaxCommoditySearchResultPrice",
+        "C_AuctionHouse.GetOwnedAuctions() -> table<OwnedAuctionInfo>",
+        "C_AuctionHouse.GetNumOwnedAuctions() / GetOwnedAuctionInfo(index) -- fallback",
         "C_AuctionHouse.IsThrottledMessageSystemReady() -> bool",
         "C_Item.GetItemInfo(itemInfo)",
         "C_CurrencyInfo.GetCoinTextureString(money, fontHeight)",
+    },
+    realm = {
+        "GetNormalizedRealmName() -> cstring",
+        "GetRealmName() -> cstring",
     },
     events = {
         "TRADE_SKILL_LIST_UPDATE / TRADE_SKILL_DATA_SOURCE_CHANGED",
         "COMMODITY_SEARCH_RESULTS_UPDATED / ITEM_SEARCH_RESULTS_UPDATED",
         "COMMODITY_SEARCH_RESULTS_RECEIVED / ITEM_SEARCH_RESULTS_ADDED",
+        "OWNED_AUCTIONS_UPDATED / AUCTION_HOUSE_SHOW",
         "AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED / THROTTLED_SYSTEM_READY",
         "ADDON_LOADED / PLAYER_LOGIN",
     },

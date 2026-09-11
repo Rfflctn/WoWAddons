@@ -15,6 +15,7 @@ local COLUMNS = {
     { key = "wood",         width = 120 },
     { key = "sellPrice",    width = 85 },
     { key = "ahQty",        width = 80,  align = "CENTER" },
+    { key = "ahMineQty",    width = 80,  align = "CENTER" },
     { key = "woodQty",      width = 45,  align = "CENTER" },
     { key = "maxWoodPrice", width = 100 },
     { key = "profit",       width = 100 },
@@ -207,6 +208,7 @@ local SORT_GETTERS = {
     wood         = function(rec, eco) return UI.GetWoodDisplayName(rec):lower() end,
     sellPrice    = function(rec, eco) return eco.outputTotalPrice or -1 end,
     ahQty        = function(rec, eco) return eco.ahQty or -1 end,
+    ahMineQty    = function(rec, eco) return eco.ahMineQty or -1 end,
     woodQty      = function(rec, eco) return rec.woodQty or 0 end,
     maxWoodPrice = function(rec, eco) return eco.maxWoodPrice or -1e18 end,
     profit       = function(rec, eco) return eco.profit or -1e18 end,
@@ -403,6 +405,16 @@ local function FillRow(row, p, dataIndex)
         end
     end
 
+    -- Наши предметы на текущем сервере. Значение агрегирует известные снимки
+    -- всех персонажей аккаунта; dash означает, что ни один снимок ещё не получен.
+    if row.cols.ahMineQty then
+        if eco.ahMineQty ~= nil then
+            row.cols.ahMineQty:SetText(tostring(eco.ahMineQty))
+        else
+            row.cols.ahMineQty:SetText(L.CELL_DASH)
+        end
+    end
+
     if row.cols.woodQty then
         row.cols.woodQty:SetText(tostring(eco.woodQty or rec.woodQty or 0))
     end
@@ -482,7 +494,15 @@ end
 local function AttachAuctionQuantity(rec, eco)
     if not eco or not rec or not rec.outputItemID then return eco end
     local P = _G.DecorLumberProfitPrices
-    if P and P.GetCachedQuantity then
+    if P and P.GetAuctionStats then
+        local ok, info = pcall(P.GetAuctionStats, rec.outputItemID)
+        if ok and info then
+            eco.ahQty = info.qty
+            eco.ahListings = info.listings
+            eco.ahMineQty = info.ownKnown and info.ownQty or nil
+            eco.ahMineListings = info.ownKnown and info.ownListings or nil
+        end
+    elseif P and P.GetCachedQuantity then
         local ok, qty, listings = pcall(P.GetCachedQuantity, rec.outputItemID)
         if ok then
             eco.ahQty = qty

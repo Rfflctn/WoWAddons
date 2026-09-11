@@ -56,6 +56,21 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                 print(L.PREFIX_ERR .. L.PRINT_TABLE_CLEARED)
             elseif msg == "scan" then
                 UI.RebuildRecipeList(true)
+            elseif msg == "multirealm on" or msg == "multirealm off" then
+                local on = (msg == "multirealm on")
+                if UI.SetMultiRealm then
+                    UI.SetMultiRealm(on)
+                else
+                    _G.DecorLumberProfitConfig = _G.DecorLumberProfitConfig or {}
+                    _G.DecorLumberProfitConfig.MULTI_REALM = on
+                    if DecorLumberProfitDB and DecorLumberProfitDB.settings then
+                        DecorLumberProfitDB.settings.multiRealm = on
+                    end
+                end
+                print(L.PREFIX_OK .. TL("PRINT_MULTIREALM_SET", on and "on" or "off"))
+            elseif msg == "multirealm" then
+                local on = UI.IsMultiRealmEnabled and UI.IsMultiRealmEnabled()
+                print(L.PREFIX_OK .. TL("PRINT_MULTIREALM_SET", on and "on" or "off"))
             elseif msg:find("^locale") then
                 local arg = msg:match("^locale%s+(%a+)")
                 local norm = DecorLumberProfitL10n.NormalizeLocaleArg(arg)
@@ -138,6 +153,9 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         print(L.PREFIX_OK .. TL("PRINT_LOADED", #(DecorLumberProfitConfig.WOOD_ITEM_IDS or {})))
 
     elseif event == "PLAYER_LOGIN" then
+        if DecorLumberProfitPrices and DecorLumberProfitPrices.InitializeRealm then
+            DecorLumberProfitPrices.InitializeRealm()
+        end
         -- Грузим накопленную ОБЩУЮ базу аккаунта (все персонажи) и обновляем learned под текущего
         local saved = DecorLumberProfitCore:LoadSavedRecipes()
         if saved and #saved > 0 then

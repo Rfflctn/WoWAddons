@@ -29,6 +29,41 @@ function UI.IsLearnedAnywhere(rec)
     return rec.learned == true or UI.HasOtherLearners(rec)
 end
 
+-- Мультиреалм-отображение: выключено по умолчанию (один мир для масс),
+-- включается командой /dlp multirealm on. Гейтит только тултип-блок
+-- «данные по серверам»; сбор и хранение данных по реалмам идут всегда,
+-- поэтому включение сразу показывает накопленную историю.
+function UI.IsMultiRealmEnabled()
+    local cfg = _G.DecorLumberProfitConfig
+    return cfg and cfg.MULTI_REALM == true or false
+end
+
+function UI.SetMultiRealm(enabled)
+    _G.DecorLumberProfitConfig = _G.DecorLumberProfitConfig or {}
+    _G.DecorLumberProfitConfig.MULTI_REALM = enabled and true or false
+    if DecorLumberProfitDB and DecorLumberProfitDB.settings then
+        DecorLumberProfitDB.settings.multiRealm = _G.DecorLumberProfitConfig.MULTI_REALM
+    end
+    return _G.DecorLumberProfitConfig.MULTI_REALM
+end
+
+local function AddRealmAuctionLines(itemID)
+    if not UI.IsMultiRealmEnabled() then return end
+    local P = _G.DecorLumberProfitPrices
+    if not (P and P.GetRealmAuctionInfo) then return end
+    local ok, realms = pcall(P.GetRealmAuctionInfo, itemID)
+    if not ok or type(realms) ~= "table" or #realms == 0 then return end
+    GameTooltip:AddLine(L.TIP_AH_REALMS_TITLE, 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L.TIP_AH_REALMS_NOTE, 0.6, 0.6, 0.6, true)
+    for _, info in ipairs(realms) do
+        local price = info.price and UI.GetMoneyStr(info.price) or L.CELL_DASH
+        local total = UI.FormatAuctionQuantity(info.qty, info.listings) or L.CELL_DASH
+        local mine = info.ownQty ~= nil and tostring(info.ownQty) or L.CELL_DASH
+        local stale = info.stale and L.TIP_AH_REALM_STALE or ""
+        GameTooltip:AddLine(TL("TIP_AH_REALM_LINE", info.name or info.key or "?", price, total, mine, stale), 0.7, 0.9, 1, true)
+    end
+end
+
 -- Тултип строки: что создаёт, профессия, реагенты с ценами, missing-цены.
 -- Этап 9: если предмет известен клиенту — полный тултип вещи (SetItemByID) + наши строки,
 -- иначе текстовый фолбэк как раньше.
@@ -79,7 +114,16 @@ function UI.ShowRowTooltip(row, dataIndex)
     -- Конкуренция: сколько готового предмета висит на АХ (та же цифра, что в колонке «На АХ»)
     if rec.outputItemID then
         local P = _G.DecorLumberProfitPrices
-        if P and P.GetCachedQuantity and UI.FormatAuctionQuantity then
+        if P and P.GetAuctionStats and UI.FormatAuctionQuantity then
+            local ok, info = pcall(P.GetAuctionStats, rec.outputItemID)
+            if ok and info then
+                local txt = UI.FormatAuctionQuantity(info.qty, info.listings)
+                if txt then GameTooltip:AddLine(TL("TIP_AHQTY_LINE", txt), 0.7, 0.9, 1) end
+                if info.ownKnown then
+                    GameTooltip:AddLine(TL("TIP_AH_MINE_LINE", tostring(info.ownQty or 0)), 0.7, 0.9, 1)
+                end
+            end
+        elseif P and P.GetCachedQuantity and UI.FormatAuctionQuantity then
             local ok, qty, listings = pcall(P.GetCachedQuantity, rec.outputItemID)
             if ok then
                 local txt = UI.FormatAuctionQuantity(qty, listings)
@@ -91,6 +135,7 @@ function UI.ShowRowTooltip(row, dataIndex)
             local txt = UI.FormatAuctionQuantity(eco.ahQty, eco.ahListings)
             if txt then GameTooltip:AddLine(TL("TIP_AHQTY_LINE", txt), 0.7, 0.9, 1) end
         end
+        AddRealmAuctionLines(rec.outputItemID)
     end
     GameTooltip:Show()
 end

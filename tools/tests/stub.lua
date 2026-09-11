@@ -23,6 +23,10 @@ C_Timer = { After = function(delay, fn) end }
 time = function() return 1000000 end
 GetTime = function() return 100.0 end
 UnitName = function() return "Tester" end
+TEST_REALM = "TestRealm"
+TEST_REALM_NAME = "Test Realm"
+GetNormalizedRealmName = function() return TEST_REALM end
+GetRealmName = function() return TEST_REALM_NAME end
 GetLocale = function() return "enUS" end
 StaticPopupDialogs = {}
 Gatherer = nil
@@ -64,5 +68,6 @@ C_AuctionHouse = {
     HasFullCommoditySearchResults = function(id) return true end,
     GetCommoditySearchResultsQuantity = function(id) return 0 end,
     GetNumCommoditySearchResults = function(id) return 0 end,
+    GetOwnedAuctions = function() return TEST_OWNED_AUCTIONS or {} end,
 }
 SLASH_DECORLUMBERPROFIT1 = nil

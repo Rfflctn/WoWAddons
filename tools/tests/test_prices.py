@@ -70,3 +70,42 @@ QI2 = DecorLumberProfitPrices.GetQueueInfo()
 ''')
     check('clearqueue zeroes queue', 'QI2.queue', '0')
     check('clearqueue zeroes overflow', 'QI2.overflow', '0')
+
+    # Realm-scoped prices and account-wide snapshots of owned auctions.
+    exec_(r'''
+TEST_OWNED_AUCTIONS = {
+    { itemKey = { itemID = 999002 }, quantity = 4 },
+    { itemKey = { itemID = 999002 }, quantity = 2 },
+    { itemKey = { itemID = 999001 }, quantity = 1 },
+}
+DecorLumberProfitPrices.InitializeRealm()
+DecorLumberProfitPrices.RefreshOwnedAuctions()
+OWNED_STATS = DecorLumberProfitPrices.GetAuctionStats(999002)
+''')
+    check('owned quantity aggregates lots', 'OWNED_STATS.ownQty', '6')
+    check('owned listings aggregates lots', 'OWNED_STATS.ownListings', '2')
+    check('owned data is known', 'tostring(OWNED_STATS.ownKnown)', 'true')
+    exec_(r'''
+TEST_REALM = "OtherRealm"
+TEST_REALM_NAME = "Other Realm"
+TEST_OWNED_AUCTIONS = { { itemKey = { itemID = 999002 }, quantity = 3 } }
+DecorLumberProfitPrices.InitializeRealm()
+DecorLumberProfitPrices.SetPrice(999002, 777000, "other")
+DecorLumberProfitPrices.RefreshOwnedAuctions()
+OTHER_STATS = DecorLumberProfitPrices.GetAuctionStats(999002)
+TEST_REALM = "TestRealm"
+TEST_REALM_NAME = "Test Realm"
+DecorLumberProfitPrices.InitializeRealm()
+DecorLumberProfitPrices.SetPrice(999002, 200000, "current")
+UnitName = function() return "Alt" end
+TEST_OWNED_AUCTIONS = { { itemKey = { itemID = 999002 }, quantity = 5 } }
+DecorLumberProfitPrices.RefreshOwnedAuctions()
+UnitName = function() return "Tester" end
+CURRENT_STATS = DecorLumberProfitPrices.GetAuctionStats(999002)
+REALM_STATS = DecorLumberProfitPrices.GetRealmAuctionInfo(999002)
+''')
+    check('other realm price isolated', 'OTHER_STATS.price', '777000')
+    check('other realm owned quantity isolated', 'OTHER_STATS.ownQty', '3')
+    check('current realm price remains separate', 'CURRENT_STATS.price', '200000')
+    check('owned quantity sums characters', 'CURRENT_STATS.ownQty', '11')
+    check('realm tooltip data has two realms', '#REALM_STATS', '2')
