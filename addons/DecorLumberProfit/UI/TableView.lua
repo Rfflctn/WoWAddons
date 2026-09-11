@@ -10,7 +10,7 @@ local TL = DecorLumberProfitL10n.TL
 -- Порядок = порядок в таблице. ahQty — конкуренция: сколько штук/лотів output на АХ.
 local COLUMNS = {
     { key = "recipe",       width = 150 },
-    { key = "prof",         width = 95 },
+    { key = "prof",         width = 36 }, -- иконка-кнопка (клик — открыть профу); имя — в тултипе
     { key = "learned",      width = 55,  align = "CENTER" },
     { key = "wood",         width = 120 },
     { key = "sellPrice",    width = 85 },
@@ -168,6 +168,81 @@ function UI.VisibleRange(scrollOffset, viewHeight, total, rowH, overscan)
     return first, count
 end
 
+-- ==== Колонка профессии: иконка + открытие по клику ====
+-- Иконка — статичная карта Recipes.GetProfessionIcon (ProfessionInfo иконки не содержит).
+-- Возвращает путь текстуры или nil (звать показывает "?"). Гарды: без Recipes — nil.
+function UI.GetProfessionIcon(nameOrRec)
+    local R = _G.DecorLumberProfitRecipes
+    if R and R.GetProfessionIcon then
+        local ok, path = pcall(R.GetProfessionIcon, nameOrRec)
+        if ok and type(path) == "string" and path ~= "" then return path end
+    end
+    return nil
+end
+
+-- Ищет skillLineID профессии рецепта среди изученных персонажем.
+-- Матч: professionID -> parentProfessionID -> нормализованное имя. Побочек нет.
+-- Возвращает skillLineID или nil (не изучена / API недоступен).
+function UI.FindProfessionSkillLine(rec)
+    if type(rec) ~= "table" then return nil end
+    local TS = C_TradeSkillUI
+    if not (TS and TS.GetAllProfessionTradeSkillLines and TS.GetProfessionInfoBySkillLineID) then return nil end
+    local ok, lines = pcall(TS.GetAllProfessionTradeSkillLines)
+    if not ok or type(lines) ~= "table" or #lines == 0 then return nil end
+    local R = _G.DecorLumberProfitRecipes
+    local function norm(name)
+        if type(name) ~= "string" then return nil end
+        if R and R.NormalizeProfessionName then
+            local nOk, n = pcall(R.NormalizeProfessionName, name)
+            if nOk and type(n) == "string" then return n end
+        end
+        return name
+    end
+    local wantName = norm(rec.profession)
+    for _, sid in ipairs(lines) do
+        if type(sid) == "number" and sid ~= 0 then
+            local iOk, info = pcall(TS.GetProfessionInfoBySkillLineID, sid)
+            if iOk and type(info) == "table" then
+                if rec.professionID and info.professionID == rec.professionID then return sid end
+                if rec.parentProfessionID
+                    and (info.professionID == rec.parentProfessionID
+                        or info.parentProfessionID == rec.parentProfessionID) then
+                    return sid
+                end
+                if wantName and norm(info.parentProfessionName or info.professionName) == wantName then
+                    return sid
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- Открывает окно профессии рецепта (клик по иконке).
+-- Не изучена этим персонажем -> молча noop (штатный кейс).
+-- API сломан / открытие не удалось при найденном skillLine -> статус + WARN в Diag.
+function UI.OpenProfession(rec)
+    if type(rec) ~= "table" then return false end
+    local TS = C_TradeSkillUI
+    if not (TS and TS.OpenTradeSkill) then
+        local D = _G.DecorLumberProfitDiag
+        if D and D.Log then pcall(D.Log, "WARN", "prof", "OpenTradeSkill API missing") end
+        UI.SetStatus(L.ST_PROF_OPEN_FAIL, 1, 0.7, 0.2)
+        return false
+    end
+    local sid = UI.FindProfessionSkillLine(rec)
+    if not sid then return false end -- не изучена — noop по дизайну
+    local ok, opened = pcall(TS.OpenTradeSkill, sid)
+    if ok and opened then return true end
+    local D = _G.DecorLumberProfitDiag
+    if D and D.Log then
+        pcall(D.Log, "WARN", "prof", "OpenTradeSkill failed sid=%s rec=%s",
+            tostring(sid), tostring(rec.recipeSpellID))
+    end
+    UI.SetStatus(L.ST_PROF_OPEN_FAIL, 1, 0.7, 0.2)
+    return false
+end
+
 -- Зебра/ховер строк
 local ZEBRA_EVEN  = { 0.15, 0.15, 0.15, 0.4 }
 local ZEBRA_ODD   = { 0.08, 0.08, 0.08, 0.4 }
@@ -300,13 +375,50 @@ local function CreateRow(parent, width)
     local x = 0
     for _, c in ipairs(UI.GetVisibleColumns()) do
         local cw = UI.ColWidth(c.key, c.width)
-        local off = (c.key == "recipe") and 20 or 2 -- отступ под иконку
-        local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("LEFT", x + off, 0)
-        fs:SetSize(cw - off - 2, ROW_H)
-        fs:SetJustifyH(c.align or "LEFT")
-        fs:SetWordWrap(false)
-        row.cols[c.key] = fs
+        if c.key == "prof" then
+            -- Иконка-кнопка профессии: клик открывает окно (если изучена), ховер — имя + подсказка
+            local btn = CreateFrame("Button", nil, row)
+            btn:SetPoint("LEFT", x + 1, 0)
+            btn:SetSize(math.max(cw - 2, 20), ROW_H)
+            local tex = btn:CreateTexture(nil, "OVERLAY")
+            tex:SetSize(16, 16)
+            tex:SetPoint("CENTER", 0, 0)
+            tex:Hide()
+            btn._icon = tex
+            local fb = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fb:SetPoint("CENTER", 0, 0)
+            fb:SetJustifyH("CENTER")
+            fb:SetText(L.CELL_PROF_UNKNOWN)
+            fb:Hide()
+            btn._fallback = fb
+            btn._rec = nil
+            btn:RegisterForClicks("LeftButtonUp")
+            btn:SetScript("OnClick", function(self)
+                UI.OpenProfession(self._rec)
+            end)
+            btn:SetScript("OnEnter", function(self)
+                local rec = self._rec
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                local pname = (type(rec) == "table" and rec.profession) or nil
+                GameTooltip:AddLine(pname or L.CELL_PROF_UNKNOWN, 1, 1, 1)
+                if UI.FindProfessionSkillLine and UI.FindProfessionSkillLine(rec) then
+                    GameTooltip:AddLine(L.TIP_PROF_OPEN_HINT, 0.6, 0.9, 0.6)
+                else
+                    GameTooltip:AddLine(L.TIP_PROF_NOT_LEARNED, 0.7, 0.7, 0.7)
+                end
+                GameTooltip:Show()
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            row.cols[c.key] = btn
+        else
+            local off = (c.key == "recipe") and 20 or 2 -- отступ под иконку
+            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", x + off, 0)
+            fs:SetSize(cw - off - 2, ROW_H)
+            fs:SetJustifyH(c.align or "LEFT")
+            fs:SetWordWrap(false)
+            row.cols[c.key] = fs
+        end
         x = x + cw
     end
 
@@ -357,9 +469,24 @@ local function FillRow(row, p, dataIndex)
         row.cols.recipe:SetText(rec.name or ("#" .. (rec.recipeSpellID or "?")))
     end
 
-    -- Профессия
+    -- Профессия: иконка-кнопка (клик — открыть, если изучена). Имя — в тултипе иконки и строки.
     if row.cols.prof then
-        row.cols.prof:SetText(rec.profession or L.CELL_PROF_UNKNOWN)
+        local btn = row.cols.prof
+        btn._rec = rec
+        local path = UI.GetProfessionIcon and UI.GetProfessionIcon(rec) or nil
+        if btn._icon and btn._fallback then
+            if path then
+                btn._icon:SetTexture(path)
+                btn._icon:Show()
+                btn._fallback:Hide()
+            else
+                btn._icon:Hide()
+                btn._fallback:SetText(L.CELL_PROF_UNKNOWN)
+                btn._fallback:Show()
+            end
+        elseif btn.SetText then
+            pcall(btn.SetText, btn, rec.profession or L.CELL_PROF_UNKNOWN)
+        end
     end
 
     -- Изучен ли рецепт: текущим персом / другим персом / никем
@@ -450,7 +577,12 @@ local function RenderEmpty(msg)
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", 0, 0)
     if row._bg then SetRowBG(row._bg, ZEBRA_ODD) end
-    for _, fs in pairs(row.cols) do fs:SetText("") end
+    for _, fs in pairs(row.cols) do
+        if fs.SetText then pcall(fs.SetText, fs, "") end
+        if fs._icon then fs._icon:Hide() end
+        if fs._fallback then fs._fallback:Hide() end
+        fs._rec = nil
+    end
     if row._icon then row._icon:Hide() end
     local vis = UI.GetVisibleColumns()
     local firstKey = vis[1] and vis[1].key or "recipe"

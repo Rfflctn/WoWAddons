@@ -232,8 +232,15 @@ function Store.SerializeRecipe(rec)
     end
     return {
         recipeSpellID = rec.recipeSpellID,
+        -- schematic.recipeID (namespace события NEW_RECIPE_LEARNED с 9.0.1).
+        -- Нужен, чтобы пометка «изучен» находила запись после рестарта:
+        -- событие несёт recipeID, а ключ базы — recipeSpellID.
+        recipeID = rec.recipeID,
         name = rec.name,
         profession = prof,
+        professionID = rec.professionID,
+        parentProfessionID = rec.parentProfessionID,
+        professionEnum = rec.professionEnum,
         outputItemID = rec.outputItemID,
         outputQty = rec.outputQty, outputMin = rec.outputMin, outputMax = rec.outputMax,
         icon = rec.icon,
@@ -274,6 +281,13 @@ function Store.SaveRecipe(rec)
         if not (ser.reagents and #ser.reagents > 0) and existing.reagents and #existing.reagents > 0 then
             ser.reagents = existing.reagents
         end
+        -- ID профессии для открытия по клику: старые записи/свежий скан без API
+        -- могут прийти с nil — не затираем ранее сохранённые значения
+        if ser.professionID == nil then ser.professionID = existing.professionID end
+        if ser.parentProfessionID == nil then ser.parentProfessionID = existing.parentProfessionID end
+        if ser.professionEnum == nil then ser.professionEnum = existing.professionEnum end
+        -- recipeID для мэппинга NEW_RECIPE_LEARNED: старые сейвы его не хранят
+        if ser.recipeID == nil then ser.recipeID = existing.recipeID end
     else
         ser.learnedBy = {}
         ser.savedAt = Now()
@@ -306,6 +320,55 @@ function Store.MarkLearnedBy(spellID)
     ser.learnedBy = ser.learnedBy or {}
     ser.learnedBy[CurrentPlayer()] = true
     ser.learned = true
+end
+
+-- Применяет событие NEW_RECIPE_LEARNED: помечает изученным и в памяти, и в DB.
+-- С 9.0.1 событие несёт recipeID (НЕ recipeSpellID-ключ базы), поэтому прямой
+-- MarkLearnedBy(eventID) промахивается; здесь мэппим оба неймспейса:
+-- совпадение по rec.recipeSpellID, rec.recipeID или rec.recipeInfo.recipeID.
+-- Без этого выученное между сканами не переживает сессию (вечное «нет»).
+-- Возвращает число применённых пометок (0 — совпадений нет).
+function Store.ApplyLearnedByEvent(list, eventID)
+    if eventID == nil then return 0 end
+    local player = CurrentPlayer()
+    local marks = 0
+    local function markSer(ser)
+        if type(ser) ~= "table" then return end
+        ser.learnedBy = ser.learnedBy or {}
+        if ser.learnedBy[player] ~= true or ser.learned ~= true then
+            ser.learnedBy[player] = true
+            ser.learned = true
+        end
+        marks = marks + 1
+    end
+    if type(list) == "table" then
+        for _, rec in ipairs(list) do
+            if type(rec) == "table" then
+                local hit = (rec.recipeSpellID == eventID) or (rec.recipeID == eventID)
+                    or (type(rec.recipeInfo) == "table" and rec.recipeInfo.recipeID == eventID)
+                if hit then
+                    rec.learned = true
+                    rec.isUnavailable = false
+                    if type(rec.learnedBy) ~= "table" then rec.learnedBy = {} end
+                    rec.learnedBy[player] = true
+                    marks = marks + 1
+                end
+            end
+        end
+    end
+    local db = _G.DecorLumberProfitDB
+    if db and type(db.recipes) == "table" then
+        local direct = db.recipes[eventID]
+        if type(direct) == "table" and direct.recipeSpellID then
+            markSer(direct)
+        end
+        for spellID, ser in pairs(db.recipes) do
+            if spellID ~= eventID and type(ser) == "table" and ser.recipeID == eventID then
+                markSer(ser)
+            end
+        end
+    end
+    return marks
 end
 
 -- Загружает все сохранённые рецепты (общие для аккаунта), ре-валидируя привязку выхода

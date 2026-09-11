@@ -211,7 +211,7 @@ local function CreateMainFrame()
     headerBG:SetColorTexture(0.12, 0.10, 0.05, 0.9)
     local labels = {
         recipe = L.HEAD_RECIPE,
-        prof = L.HEAD_PROF,
+        prof = L.HEAD_PROF_SHORT or L.HEAD_PROF,
         learned = L.HEAD_LEARNED,
         wood = L.HEAD_WOOD,
         sellPrice = L.HEAD_SELL,

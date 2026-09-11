@@ -40,6 +40,7 @@ DecorLumberProfitLocale = {
         -- Колонки таблицы
         HEAD_RECIPE = "Recipe",
         HEAD_PROF = "Profession",
+        HEAD_PROF_SHORT = "Prof.",
         HEAD_LEARNED = "Learned",
         HEAD_WOOD = "Lumber",
         HEAD_SELL = "Sale",
@@ -49,7 +50,7 @@ DecorLumberProfitLocale = {
         HEAD_MAXPRICE = "Wood price",
         HEAD_PROFIT = "Profit",
         HINT_RECIPE = "Click to sort by recipe name.",
-        HINT_PROF = "Profession that crafts the item. Click to sort.",
+        HINT_PROF = "Profession that crafts the item. Click the icon to open it (if learned by this character). Click header to sort.",
         HINT_LEARNED = "Is the recipe learned by this character (\"other\" — learned by another character on the account). Click to sort.",
         HINT_WOOD = "Which lumber the recipe consumes. Click to sort.",
         HINT_SELL = "Market price of the crafted item: per unit / total per craft. Click to sort.",
@@ -69,6 +70,9 @@ DecorLumberProfitLocale = {
         CELL_NO_AH = "|cffff5555no AH|r",
         CELL_DASH = "|cffff5555—|r",
         CELL_NO_PRICE = "|cffff5555no price|r",
+        TIP_PROF_OPEN_HINT = "Click — open profession",
+        TIP_PROF_NOT_LEARNED = "Not learned by this character",
+        ST_PROF_OPEN_FAIL = "Failed to open profession window.",
 
         -- Тултип строки
         TIP_RECIPE_FALLBACK = "Recipe",
@@ -184,6 +188,7 @@ DecorLumberProfitLocale = {
         -- Колонки таблицы
         HEAD_RECIPE = "Рецепт",
         HEAD_PROF = "Профессия",
+        HEAD_PROF_SHORT = "Проф.",
         HEAD_LEARNED = "Изучен",
         HEAD_WOOD = "Древесина",
         HEAD_SELL = "Продажа",
@@ -193,7 +198,7 @@ DecorLumberProfitLocale = {
         HEAD_MAXPRICE = "Цена др.",
         HEAD_PROFIT = "Прибыль",
         HINT_RECIPE = "Клик — сортировка по имени рецепта.",
-        HINT_PROF = "Профессия, в которой создаётся предмет. Клик — сортировка.",
+        HINT_PROF = "Профессия, в которой создаётся предмет. Клик по иконке — открыть (если изучена этим персонажем). Клик по шапке — сортировка.",
         HINT_LEARNED = "Изучен ли рецепт текущим персонажем («др.перс» — изучен другим персонажем аккаунта). Клик — сортировка.",
         HINT_WOOD = "Какая древесина расходуется в рецепте. Клик — сортировка.",
         HINT_SELL = "Цена готового предмета на аукционе: за штуку / всего за один крафт. Клик — сортировка.",
@@ -213,6 +218,9 @@ DecorLumberProfitLocale = {
         CELL_NO_AH = "|cffff5555нет на АХ|r",
         CELL_DASH = "|cffff5555—|r",
         CELL_NO_PRICE = "|cffff5555нет цены|r",
+        TIP_PROF_OPEN_HINT = "Клик — открыть профессию",
+        TIP_PROF_NOT_LEARNED = "Не изучена этим персонажем",
+        ST_PROF_OPEN_FAIL = "Не удалось открыть окно профессии.",
 
         -- Тултип строки
         TIP_RECIPE_FALLBACK = "Рецепт",

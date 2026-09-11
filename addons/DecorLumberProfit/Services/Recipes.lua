@@ -134,6 +134,49 @@ function Recipes.NormalizeProfessionName(name)
     return t
 end
 
+-- Статичная карта иконок базовых профессий (ключа — EN-база из PROF_BASE_EN).
+-- ProfessionInfo иконки не содержит, поэтому динамика через API невозможна;
+-- карта работает и для старых сейвов (у них только имя-строка).
+-- Неизвестное имя -> nil (звать показывает "?"); пути сверены с клиентом при smoke-test.
+local PROF_ICONS = {
+    ["First Aid"]      = "Interface\\ICONS\\INV_Misc_Bandage_12",
+    ["Blacksmithing"]  = "Interface\\ICONS\\Trade_BlackSmithing",
+    ["Leatherworking"] = "Interface\\ICONS\\Trade_LeatherWorking",
+    ["Alchemy"]        = "Interface\\ICONS\\Trade_Alchemy",
+    ["Herbalism"]      = "Interface\\ICONS\\Trade_Herbalism",
+    ["Cooking"]        = "Interface\\ICONS\\INV_Misc_Food_15",
+    ["Mining"]         = "Interface\\ICONS\\Trade_Mining",
+    ["Tailoring"]      = "Interface\\ICONS\\Trade_Tailoring",
+    ["Engineering"]    = "Interface\\ICONS\\Trade_Engineering",
+    ["Enchanting"]     = "Interface\\ICONS\\Trade_Engraving",
+    ["Fishing"]        = "Interface\\ICONS\\Trade_Fishing",
+    ["Skinning"]       = "Interface\\ICONS\\INV_Misc_Pelt_Wolf_01",
+    ["Jewelcrafting"]  = "Interface\\ICONS\\INV_Misc_Gem_01",
+    ["Inscription"]    = "Interface\\ICONS\\INV_Inscription_Tradeskill01",
+    ["Archaeology"]    = "Interface\\ICONS\\Trade_Archaeology",
+    ["Carpentry"]      = "Interface\\ICONS\\INV_Misc_Wood_01",
+}
+-- RU-алиасы: на RU-клиенте parentProfessionName приходит по-русски
+-- ("Кузнечное дело"), нормализация возвращает RU-базу — маппим её на ту же иконку.
+-- PROF_BASE_RU идёт в том же порядке, что PROF_BASE_EN (без Carpentry:
+-- RU-название новой профессии Midnight уточняется по клиенту, фолбэк — "?").
+for _ri, _ru in ipairs(PROF_BASE_RU) do
+    local _en = PROF_BASE_EN[_ri]
+    if _en and PROF_ICONS[_en] and not PROF_ICONS[_ru] then PROF_ICONS[_ru] = PROF_ICONS[_en] end
+end
+
+-- Иконка профессии по имени (строка) или записи рецепта ({profession=...}).
+-- Нормализует RU-варианты ("Зандаларское кузнечное дело" -> "Blacksmithing").
+-- Чистая функция (тестируема без клиента). Возвращает путь текстуры или nil.
+function Recipes.GetProfessionIcon(nameOrRec)
+    local name = nameOrRec
+    if type(nameOrRec) == "table" then name = nameOrRec.profession end
+    if type(name) ~= "string" or name == "" then return nil end
+    local norm = Recipes.NormalizeProfessionName(name)
+    if type(norm) ~= "string" then return nil end
+    return PROF_ICONS[norm]
+end
+
 -- База из ProfessionInfo: parentProfessionName (истина) -> нормализация professionName -> nil.
 local function GetBaseProfessionName(profInfo)
     if type(profInfo) ~= "table" then return nil end
@@ -301,6 +344,9 @@ function Recipes.GetRecipeData(recipeSpellID)
         recipeID = schematic.recipeID,
         name = schematic.name or (info and info.name) or ("Spell "..recipeSpellID),
         profession = GetBaseProfessionName(profInfo),
+        professionID = (type(profInfo) == "table" and profInfo.professionID) or nil,
+        parentProfessionID = (type(profInfo) == "table" and profInfo.parentProfessionID) or nil,
+        professionEnum = (type(profInfo) == "table" and profInfo.profession) or nil,
         outputItemID = outputItemID,
         outputMin = schematic.quantityMin or 1,
         outputMax = schematic.quantityMax or 1,
