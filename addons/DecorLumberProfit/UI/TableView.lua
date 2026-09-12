@@ -11,11 +11,11 @@ local TL = DecorLumberProfitL10n.TL
 local COLUMNS = {
     { key = "recipe",       width = 150 },
     { key = "prof",         width = 54 }, -- иконка-кнопка (клик — открыть профу); имя — в тултипе
-    { key = "learned",      width = 55,  align = "CENTER" },
+    { key = "learned",      width = 110, align = "CENTER" }, -- имена персонажей (п.1), поэтому шире
     { key = "wood",         width = 120 },
     { key = "sellPrice",    width = 85 },
-    { key = "ahQty",        width = 80,  align = "CENTER" },
-    { key = "ahMineQty",    width = 80,  align = "CENTER" },
+    { key = "ahQty",        width = 55,  align = "CENTER" }, -- по заголовку «На АХ» (п.3)
+    { key = "ahMineQty",    width = 55,  align = "CENTER" }, -- по заголовку «Мои» (п.3)
     { key = "woodQty",      width = 45,  align = "CENTER" },
     { key = "maxWoodPrice", width = 100 },
     { key = "profit",       width = 100 },
@@ -441,6 +441,21 @@ function UI.FormatAuctionQuantity(qty, listings)
     return tostring(qty)
 end
 
+-- Fallback для колонок «На АХ»/«Мои» с другого сервера (п.4): текущее значение
+-- приоритетно, но если на текущем сервере данных нет — показываем первое известное
+-- с другого сервера + "*" (расшифровка по серверам — в тултипе строки).
+-- realms — список из Prices.GetRealmAuctionInfo, field — "qty" или "ownQty".
+-- Чистая функция (тесты). Возвращает строку или nil.
+function UI.FallbackRealmQuantity(realms, field)
+    if type(realms) ~= "table" or (field ~= "qty" and field ~= "ownQty") then return nil end
+    for _, info in ipairs(realms) do
+        if type(info) == "table" and info[field] ~= nil then
+            return tostring(info[field]) .. "*"
+        end
+    end
+    return nil
+end
+
 local function SortPairs(pairs)
     local getter = UI._sortKey and SORT_GETTERS[UI._sortKey]
     if not getter then
@@ -562,20 +577,10 @@ end
 -- Учитывает только видимые колонки (панель «Столбцы»); при смене видимости пул сносится.
 local function CreateRow(parent, width)
     local ROW_H = UI.GetRowHeight()
-    local ICON_SZ = UI.RowIconSize()
+    local ICON_SZ = UI.RowIconSize() -- только для иконки профессии (у рецепта иконки нет, п.2)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(width, ROW_H)
     row._dataIndex = 0
-
-    -- Иконка предмета (Этап 9): только у колонки рецепта.
-    -- Обрезана через ApplyIconCrop, якорь/размер правит LayoutRecipeCell,
-    -- чтобы без иконки текст шёл от края как шапка (без пустого отступа).
-    local icon = row:CreateTexture(nil, "OVERLAY")
-    icon:SetPoint("LEFT", 2, 0)
-    icon:SetSize(ICON_SZ, ICON_SZ)
-    ApplyIconCrop(icon)
-    icon:Hide()
-    row._icon = icon
 
     row.cols = {}
     row._colX = {}
@@ -621,10 +626,8 @@ local function CreateRow(parent, width)
             btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
             row.cols[c.key] = btn
         else
-            -- Рецепт: стартовый отступ минимальный (2). Реальный сдвиг под иконку
-            -- выставляет FillRow/LayoutRecipeCell: без иконки текст идёт от края
-            -- как шапка, с иконкой — после неё (ICON_SZ + 4). Фикс 20px давал
-            -- пустые 18px слева и обрезал названия ("Арденвельдский ф...").
+            -- Текстовая ячейка: отступ 2 от края колонки (иконки у рецепта нет, п.2 —
+            -- текст идёт как шапка, без пустого места слева).
             local off = 2
             local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             fs:SetPoint("LEFT", x + off, 0)
@@ -668,40 +671,6 @@ local function EnsurePool(n)
     for i = n + 1, #rows do rows[i]:Hide() end
 end
 
--- Раскладка ячейки рецепта: без иконки текст от края (как шапка, off=2),
--- с иконкой — после неё (ICON_SZ + 4). Вызывается из FillRow/RenderEmpty,
--- т.к. пул переиспользуется и статичный off=20 давал пустое место слева.
-local function LayoutRecipeCell(row, hasIcon)
-    local fs = row.cols and row.cols.recipe
-    if not fs then
-        if row._icon then row._icon:Hide() end
-        return
-    end
-    local ROW_H = UI.GetRowHeight()
-    local ICON_SZ = UI.RowIconSize()
-    local baseX = (row._colX and row._colX.recipe) or 0
-    local cw = UI.ColWidth("recipe", 150)
-    if hasIcon then
-        if row._icon then
-            if row._icon.SetSize then row._icon:SetSize(ICON_SZ, ICON_SZ) end
-            if row._icon.ClearAllPoints and row._icon.SetPoint then
-                row._icon:ClearAllPoints()
-                row._icon:SetPoint("LEFT", baseX + 2, 0)
-            end
-        end
-        local off = ICON_SZ + 4
-        fs:ClearAllPoints()
-        fs:SetPoint("LEFT", baseX + off, 0)
-        fs:SetSize(math.max(cw - off - 2, 10), ROW_H)
-    else
-        if row._icon then row._icon:Hide() end
-        local off = 2
-        fs:ClearAllPoints()
-        fs:SetPoint("LEFT", baseX + off, 0)
-        fs:SetSize(math.max(cw - off - 2, 10), ROW_H)
-    end
-end
-
 -- Заполнение одной строки данными (позиция — по dataIndex, не по месту в пуле)
 -- Все обращения к row.cols.* за гардами: колонка может быть скрыта через панель «Столбцы».
 local function FillRow(row, p, dataIndex)
@@ -711,22 +680,7 @@ local function FillRow(row, p, dataIndex)
     row:SetPoint("TOPLEFT", 0, -(dataIndex - 1) * ROW_H)
     if row._bg then SetRowBG(row._bg, RowBGColor(dataIndex)) end
     local rec, eco = p.rec, p.eco
-    -- Иконка предмета + сдвиг текста: место резервируем только если иконка есть.
-    -- Рецепт скрыт через «Столбцы» — иконку прячем, чтобы не лезла на соседнюю колонку.
-    if not row.cols.recipe then
-        if row._icon then row._icon:Hide() end
-    elseif rec.icon then
-        if row._icon then
-            row._icon:SetTexture(rec.icon)
-            ApplyIconCrop(row._icon)
-            row._icon:Show()
-        end
-        LayoutRecipeCell(row, true)
-    else
-        if row._icon then row._icon:Hide() end
-        LayoutRecipeCell(row, false)
-    end
-    -- Рецепт
+    -- Рецепт (иконки нет, п.2 — только текст от края колонки, как шапка)
     if row.cols.recipe then
         row.cols.recipe:SetText(rec.name or ("#" .. (rec.recipeSpellID or "?")))
     end
@@ -752,11 +706,13 @@ local function FillRow(row, p, dataIndex)
         end
     end
 
-    -- Изучен ли рецепт: текущим персом / другим персом / никем
+    -- Изучен: имена персонажей, знающих рецепт (п.1; фолбэки — да/нет/? для legacy)
     if row.cols.learned then
-        if rec.learned == true then
+        if UI.FormatLearnedCell then
+            row.cols.learned:SetText(UI.FormatLearnedCell(rec))
+        elseif rec.learned == true then
             row.cols.learned:SetText(L.CELL_YES)
-        elseif UI.HasOtherLearners(rec) then
+        elseif UI.HasOtherLearners and UI.HasOtherLearners(rec) then
             row.cols.learned:SetText(L.CELL_OTHER)
         elseif rec.learned == false then
             row.cols.learned:SetText(L.CELL_NO)
@@ -784,24 +740,37 @@ local function FillRow(row, p, dataIndex)
         end
     end
 
-    -- Конкуренция: сколько штук output выложено на АХ (qty + число лотов).
-    -- nil (не сканировали) — dash; 0 (пустой АХ, noauction) — "0".
+    -- Конкуренция: сколько штук output выложено на АХ.
+    -- nil (не сканировали текущий сервер) — fallback с другого сервера + "*"
+    -- (п.4, хранение realm-scoped как у цены); совсем нет данных — dash.
+    -- 0 (пустой АХ, noauction) — "0".
     if row.cols.ahQty then
         local txt = UI.FormatAuctionQuantity(eco.ahQty, eco.ahListings)
         if txt then
             row.cols.ahQty:SetText(txt)
         else
-            row.cols.ahQty:SetText(L.CELL_DASH)
+            local fb = UI.FallbackRealmQuantity and UI.FallbackRealmQuantity(eco.ahRealms, "qty") or nil
+            if fb then
+                row.cols.ahQty:SetText(fb)
+            else
+                row.cols.ahQty:SetText(L.CELL_DASH)
+            end
         end
     end
 
-    -- Наши предметы на текущем сервере. Значение агрегирует известные снимки
-    -- всех персонажей аккаунта; dash означает, что ни один снимок ещё не получен.
+    -- Наши предметы: сначала текущий сервер (сумма снимков всех персонажей
+    -- аккаунта на нём). Если снимков текущего сервера нет — значение с другого
+    -- сервера + "*" (п.4); dash означает, что ни один снимок ещё не получен нигде.
     if row.cols.ahMineQty then
         if eco.ahMineQty ~= nil then
             row.cols.ahMineQty:SetText(tostring(eco.ahMineQty))
         else
-            row.cols.ahMineQty:SetText(L.CELL_DASH)
+            local fb = UI.FallbackRealmQuantity and UI.FallbackRealmQuantity(eco.ahRealms, "ownQty") or nil
+            if fb then
+                row.cols.ahMineQty:SetText(fb)
+            else
+                row.cols.ahMineQty:SetText(L.CELL_DASH)
+            end
         end
     end
 
@@ -846,10 +815,6 @@ local function RenderEmpty(msg)
         if fs._fallback then fs._fallback:Hide() end
         fs._rec = nil
     end
-    if row._icon then row._icon:Hide() end
-    -- Сбрасываем сдвиг рецепта: пустая строка всегда без иконки (иначе сообщение
-    -- унаследует off от прошлого FillRow с иконкой и будет с тем же отступом).
-    if row.cols.recipe then LayoutRecipeCell(row, false) end
     local vis = UI.GetVisibleColumns()
     local firstKey = vis[1] and vis[1].key or "recipe"
     if row.cols[firstKey] then
@@ -889,6 +854,8 @@ function UI.RenderVisibleRows()
 end
 
 -- Добивка eco конкуренцией с АХ (не меняет формулу Economy: только отображение/сортировка).
+-- ahQty/ahMineQty — текущий сервер (как цена); ahRealms — сводка по ВСЕМ известным
+-- серверам (realm-scoped хранение как у цены, п.4) для fallback "*" и тултипа.
 local function AttachAuctionQuantity(rec, eco)
     if not eco or not rec or not rec.outputItemID then return eco end
     local P = _G.DecorLumberProfitPrices
@@ -905,6 +872,12 @@ local function AttachAuctionQuantity(rec, eco)
         if ok then
             eco.ahQty = qty
             eco.ahListings = listings
+        end
+    end
+    if P and P.GetRealmAuctionInfo then
+        local okR, realms = pcall(P.GetRealmAuctionInfo, rec.outputItemID)
+        if okR and type(realms) == "table" and #realms > 0 then
+            eco.ahRealms = realms
         end
     end
     return eco

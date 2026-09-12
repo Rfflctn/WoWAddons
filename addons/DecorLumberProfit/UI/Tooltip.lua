@@ -24,6 +24,39 @@ function UI.HasOtherLearners(rec)
     return false
 end
 
+-- Имена персонажей, знающих рецепт: отсортированный список ключей learnedBy == true.
+-- Чистая функция (тесты). Пустой массив — никто не знает / данных нет.
+function UI.GetLearnerNames(rec)
+    local out = {}
+    if type(rec) ~= "table" then return out end
+    local lb = rec.learnedBy
+    if type(lb) ~= "table" then return out end
+    for name, v in pairs(lb) do
+        if v == true and type(name) == "string" and name ~= "" then
+            out[#out + 1] = name
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Текст ячейки «Изучен»: имена знающих через ", " (сразу видно, каким персом учить).
+-- Фолбэки для legacy-записей без learnedBy: CELL_YES (learned==true),
+-- CELL_NO (learned==false), иначе CELL_UNKNOWN.
+function UI.FormatLearnedCell(rec)
+    local names = UI.GetLearnerNames(rec)
+    if #names > 0 then
+        return table.concat(names, ", ")
+    end
+    if type(rec) == "table" and rec.learned == true then
+        return L.CELL_YES
+    elseif type(rec) == "table" and rec.learned == false then
+        return L.CELL_NO
+    else
+        return L.CELL_UNKNOWN
+    end
+end
+
 -- Изучен ли рецепт хотя бы на одном персонаже аккаунта
 function UI.IsLearnedAnywhere(rec)
     return rec.learned == true or UI.HasOtherLearners(rec)
@@ -48,11 +81,14 @@ function UI.SetMultiRealm(enabled)
 end
 
 local function AddRealmAuctionLines(itemID)
-    if not UI.IsMultiRealmEnabled() then return end
     local P = _G.DecorLumberProfitPrices
     if not (P and P.GetRealmAuctionInfo) then return end
     local ok, realms = pcall(P.GetRealmAuctionInfo, itemID)
     if not ok or type(realms) ~= "table" or #realms == 0 then return end
+    -- Сравнение серверов (п.4): при данных с 2+ серверов блок показываем всегда,
+    -- даже если /dlp multirealm off (массовый дефолт — один мир без лишних строк).
+    -- При одном сервере — только если multirealm явно включён.
+    if #realms < 2 and not UI.IsMultiRealmEnabled() then return end
     GameTooltip:AddLine(L.TIP_AH_REALMS_TITLE, 0.8, 0.8, 0.8)
     GameTooltip:AddLine(L.TIP_AH_REALMS_NOTE, 0.6, 0.6, 0.6, true)
     for _, info in ipairs(realms) do
@@ -93,6 +129,14 @@ function UI.ShowRowTooltip(row, dataIndex)
     end
     if rec.profession then
         GameTooltip:AddLine(TL("TIP_PROFESSION", rec.profession), 0.6, 0.9, 1)
+    end
+    -- Кто изучил: имена персонажей (та же строка, что в колонке «Изучен»;
+    -- в ячейке длинные списки могут резаться шириной колонки).
+    if UI.GetLearnerNames then
+        local learners = UI.GetLearnerNames(rec)
+        if type(learners) == "table" and #learners > 0 then
+            GameTooltip:AddLine(TL("TIP_LEARNED_BY", table.concat(learners, ", ")), 0.6, 1, 0.6)
+        end
     end
     if rec.reagents then
         GameTooltip:AddLine(L.TIP_REAGENTS, 0.8, 0.8, 0.8)

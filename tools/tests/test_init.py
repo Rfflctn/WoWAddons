@@ -4,7 +4,7 @@
 def run(lua, check, exec_):
     check('addon namespace exists', 'tostring(DecorLumberProfit ~= nil)', 'true')
     check('addon name', 'DecorLumberProfit.NAME', 'DecorLumberProfit')
-    check('addon version', 'DecorLumberProfit.VERSION', '2.0.1')
+    check('addon version', 'DecorLumberProfit.VERSION', '2.1.0')
     check('addon db schema v2', 'DecorLumberProfit.DB_SCHEMA', '2')
     exec_('ADDON_SC_OK, ADDON_SC_VAL = DecorLumberProfit.SafeCall(function(a, b) return a + b end, 2, 3)')
     check('safecall ok', 'tostring(ADDON_SC_OK)', '5')
@@ -17,4 +17,4 @@ def run(lua, check, exec_):
     exec_('ADDON_CT = DecorLumberProfit.CountTable({ a = 1, b = 2, c = 3 })')
     check('count 3', 'ADDON_CT', '3')
     # Diag must report the version owned by Init (single source).
-    check('diag version tracks init', 'tostring(string.find(DecorLumberProfitDiag.ADDON_VERSION, "2.0.1", 1, true) ~= nil)', 'true')
+    check('diag version tracks init', 'tostring(string.find(DecorLumberProfitDiag.ADDON_VERSION, "2.1.0", 1, true) ~= nil)', 'true')
