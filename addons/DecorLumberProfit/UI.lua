@@ -31,5 +31,6 @@ UI._loadedFromDB = false
 UI._hiddenColumns = {} -- { [colKey] = true } — скрытые колонки (панель «Столбцы», персист в DB.settings)
 UI._columnsPanel = nil
 UI._colChecks = {}
+UI._rowHeightLabel = nil -- цифра степпера высоты строк в футере (MainFrame)
 
 _G.DecorLumberProfitUI = UI

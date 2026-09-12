@@ -58,3 +58,28 @@ TV_MR_OFF = DecorLumberProfitUI.IsMultiRealmEnabled()
     check('multirealm set on', 'tostring(TV_MR_ON)', 'true')
     check('multirealm persisted', 'tostring(TV_MR_SAVED)', 'true')
     check('multirealm set off', 'tostring(TV_MR_OFF)', 'false')
+    # высота строк: дефолт 20 (иконка 18), set 16..32 с персистом, мимо — reject
+    exec_(r'''
+DecorLumberProfitDB = DecorLumberProfitDB or { settings = {} }
+DecorLumberProfitDB.settings = DecorLumberProfitDB.settings or {}
+DecorLumberProfitUI._rowHeight = nil
+TV_RH_DEFAULT = DecorLumberProfitUI.GetRowHeight()
+TV_RH_ICON = DecorLumberProfitUI.RowIconSize()
+TV_RH_SET = DecorLumberProfitUI.SetRowHeight(24)
+TV_RH_NOW = DecorLumberProfitUI.GetRowHeight()
+TV_RH_ICON2 = DecorLumberProfitUI.RowIconSize()
+TV_RH_SAVED = DecorLumberProfitDB.settings.rowHeight
+TV_RH_BAD = DecorLumberProfitUI.SetRowHeight(10)
+TV_RH_STILL = DecorLumberProfitUI.GetRowHeight()
+DecorLumberProfitUI._rowHeight = nil
+TV_RH_LOADED = DecorLumberProfitUI.LoadRowHeight()
+''')
+    check('rowheight default 20', 'tostring(TV_RH_DEFAULT)', '20')
+    check('rowheight default icon 18', 'tostring(TV_RH_ICON)', '18')
+    check('rowheight set ok', 'tostring(TV_RH_SET)', 'true')
+    check('rowheight applied', 'tostring(TV_RH_NOW)', '24')
+    check('rowheight icon scales', 'tostring(TV_RH_ICON2)', '22')
+    check('rowheight persisted', 'tostring(TV_RH_SAVED)', '24')
+    check('rowheight reject low', 'tostring(TV_RH_BAD)', 'false')
+    check('rowheight unchanged', 'tostring(TV_RH_STILL)', '24')
+    check('rowheight load restores', 'tostring(TV_RH_LOADED)', '24')

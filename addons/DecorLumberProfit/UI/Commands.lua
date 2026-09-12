@@ -35,6 +35,7 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         DecorLumberProfitL10n.SetLocale(loc)
         UI.hideUnlearned = DecorLumberProfitDB.settings.hideUnlearned and true or false
         if UI.LoadColumnVisibility then UI.LoadColumnVisibility() end
+        if UI.LoadRowHeight then UI.LoadRowHeight() end
         UI.RegisterPopups()
 
         SLASH_DECORLUMBERPROFIT1 = "/dlp"
@@ -71,6 +72,13 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             elseif msg == "multirealm" then
                 local on = UI.IsMultiRealmEnabled and UI.IsMultiRealmEnabled()
                 print(L.PREFIX_OK .. TL("PRINT_MULTIREALM_SET", on and "on" or "off"))
+            elseif msg:find("^rowheight") then
+                local n = tonumber(msg:match("^rowheight%s+(%d+)"))
+                if n and UI.SetRowHeight and UI.SetRowHeight(n) then
+                    print(L.PREFIX_OK .. TL("PRINT_ROWHEIGHT_SET", tostring(UI.GetRowHeight())))
+                else
+                    print(L.PREFIX_ERR .. L.PRINT_ROWHEIGHT_USAGE)
+                end
             elseif msg:find("^locale") then
                 local arg = msg:match("^locale%s+(%a+)")
                 local norm = DecorLumberProfitL10n.NormalizeLocaleArg(arg)
@@ -171,12 +179,13 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         if DecorLumberProfitCore and DecorLumberProfitCore.RememberRecipe then
             DecorLumberProfitCore:RememberRecipe(recipeID, recipeLevel)
         end
-        if DecorLumberProfitCore and DecorLumberProfitCore.MarkLearnedBy then
-            DecorLumberProfitCore:MarkLearnedBy(recipeID)
+        -- Событие несёт recipeID (9.0.1+, НЕ recipeSpellID-ключ базы), поэтому
+        -- прямой MarkLearnedBy промахивается; ApplyLearnedByEvent мэппит оба
+        -- неймспейса и помечает запись в памяти и в DB — иначе выученное
+        -- не переживает сессию. Refresh ниже — страховка для живых API-данных.
+        if DecorLumberProfitCore and DecorLumberProfitCore.ApplyLearnedByEvent then
+            pcall(function() DecorLumberProfitCore:ApplyLearnedByEvent(UI._currentRecipes, recipeID) end)
         end
-        -- Событие несёт recipeID (не recipeSpellID-ключ базы), поэтому точечная
-        -- пометка выше может не попасть; сверяем известные рецепты с живым API
-        -- и сразу сохраняем флаги в DB (переживёт /reload без ручного скана)
         pcall(function() DecorLumberProfitCore:RefreshLearnedFlags(UI._currentRecipes) end)
         if UI._mainFrame and UI._mainFrame:IsShown() then
             C_Timer.After(0.5, function() UI.RebuildRecipeList(false) end)
@@ -213,6 +222,11 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         -- Предмет догрузился с сервера: проверяем отложенные рецепты (bindType был неизвестен)
         local resolved = DecorLumberProfitCore:ResolvePendingBind()
         if resolved and #resolved > 0 then
+            -- Холодный старт: записи подняты из DB со stale-флагами learned
+            -- (при логине LoadSavedRecipes паркует их в pending и Refresh пропускается).
+            -- Сверяем с живым API ДО сохранения, иначе «нет» застревает между сессиями.
+            -- API не ответил (nil) — Refresh ничего не трогает, stale сохраняется.
+            pcall(function() DecorLumberProfitCore:RefreshLearnedFlags(resolved) end)
             local existing = UI.BuildExistingSet(UI._currentRecipes)
             local added = 0
             for _, rec in ipairs(resolved) do

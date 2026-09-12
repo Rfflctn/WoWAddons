@@ -39,7 +39,9 @@ DecorLumberProfitConfig.API_CHECKLIST = {
         "C_TradeSkillUI.GetRecipeInfo(recipeSpellID [,recipeLevel]) -> ?TradeSkillRecipeInfo",
         "C_TradeSkillUI.GetRecipeSchematic(recipeSpellID, isRecraft [,recipeLevel]) -> CraftingRecipeSchematic",
         "C_TradeSkillUI.GetRecipeOutputItemData(recipeSpellID) -> CraftingRecipeOutputInfo",
-        "C_TradeSkillUI.OpenTradeSkill(skillLineID) -> bool",
+        "C_TradeSkillUI.OpenTradeSkill(skillLineID) -> bool -- принимает КЛАССИЧЕСКИЙ ID профы (164/165/171...), expansion-варианты (напр. 2907) возвращают false",
+        "C_TradeSkillUI.GetProfessionSkillLineID(professionEnum) -> skillLineID -- точный ID текущей ветки для OpenTradeSkill",
+        "C_TradeSkillUI.OpenRecipe(recipeID) -- запасной путь: открывает окно профы на рецепте",
     },
     auction = {
         "C_AuctionHouse.MakeItemKey(itemID, itemLevel, itemSuffix, battlePetSpeciesID) -> ItemKey",

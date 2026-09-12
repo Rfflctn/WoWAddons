@@ -10,7 +10,7 @@ local TL = DecorLumberProfitL10n.TL
 -- Порядок = порядок в таблице. ahQty — конкуренция: сколько штук/лотів output на АХ.
 local COLUMNS = {
     { key = "recipe",       width = 150 },
-    { key = "prof",         width = 36 }, -- иконка-кнопка (клик — открыть профу); имя — в тултипе
+    { key = "prof",         width = 54 }, -- иконка-кнопка (клик — открыть профу); имя — в тултипе
     { key = "learned",      width = 55,  align = "CENTER" },
     { key = "wood",         width = 120 },
     { key = "sellPrice",    width = 85 },
@@ -180,15 +180,16 @@ function UI.GetProfessionIcon(nameOrRec)
     return nil
 end
 
--- Ищет skillLineID профессии рецепта среди изученных персонажем.
+-- Ищет skillLineID профессии рецепта среди линий персонажа.
 -- Матч: professionID -> parentProfessionID -> нормализованное имя. Побочек нет.
--- Возвращает skillLineID или nil (не изучена / API недоступен).
-function UI.FindProfessionSkillLine(rec)
-    if type(rec) ~= "table" then return nil end
+-- Возвращает список (может быть пустым). Порядок — порядок клиента.
+function UI.FindProfessionSkillLines(rec)
+    local out = {}
+    if type(rec) ~= "table" then return out end
     local TS = C_TradeSkillUI
-    if not (TS and TS.GetAllProfessionTradeSkillLines and TS.GetProfessionInfoBySkillLineID) then return nil end
+    if not (TS and TS.GetAllProfessionTradeSkillLines and TS.GetProfessionInfoBySkillLineID) then return out end
     local ok, lines = pcall(TS.GetAllProfessionTradeSkillLines)
-    if not ok or type(lines) ~= "table" or #lines == 0 then return nil end
+    if not ok or type(lines) ~= "table" or #lines == 0 then return out end
     local R = _G.DecorLumberProfitRecipes
     local function norm(name)
         if type(name) ~= "string" then return nil end
@@ -203,24 +204,75 @@ function UI.FindProfessionSkillLine(rec)
         if type(sid) == "number" and sid ~= 0 then
             local iOk, info = pcall(TS.GetProfessionInfoBySkillLineID, sid)
             if iOk and type(info) == "table" then
-                if rec.professionID and info.professionID == rec.professionID then return sid end
-                if rec.parentProfessionID
+                local hit = false
+                if rec.professionID and info.professionID == rec.professionID then hit = true end
+                if not hit and rec.parentProfessionID
                     and (info.professionID == rec.parentProfessionID
                         or info.parentProfessionID == rec.parentProfessionID) then
-                    return sid
+                    hit = true
                 end
-                if wantName and norm(info.parentProfessionName or info.professionName) == wantName then
-                    return sid
+                if not hit and wantName
+                    and norm(info.parentProfessionName or info.professionName) == wantName then
+                    hit = true
                 end
+                if hit then out[#out + 1] = sid end
             end
         end
+    end
+    return out
+end
+
+function UI.FindProfessionSkillLine(rec)
+    local list = UI.FindProfessionSkillLines(rec)
+    return list[1]
+end
+
+-- Кандидаты для C_TradeSkillUI.OpenTradeSkill (по приоритету, без дублей).
+-- ВАЖНО: OpenTradeSkill принимает классический ID профессии (164/165/171...),
+-- а НЕ expansion-вариант skillLine (напр. 2907 -> всегда false). Поэтому первым
+-- идёт GetProfessionSkillLineID(Enum) — рекомендованный Blizzard путь.
+function UI.ProfessionOpenCandidates(rec)
+    local ids, seen = {}, {}
+    local function add(id)
+        if type(id) == "number" and id ~= 0 and not seen[id] then
+            seen[id] = true
+            ids[#ids + 1] = id
+        end
+    end
+    if type(rec) ~= "table" then return ids end
+    local TS = C_TradeSkillUI
+    if TS and TS.GetProfessionSkillLineID and rec.professionEnum then
+        local ok, sid = pcall(TS.GetProfessionSkillLineID, rec.professionEnum)
+        if ok then add(sid) end
+    end
+    add(rec.professionID)
+    add(rec.parentProfessionID)
+    local R = _G.DecorLumberProfitRecipes
+    if R and R.GetClassicProfessionID and type(rec.profession) == "string" then
+        local ok, cid = pcall(R.GetClassicProfessionID, rec.profession)
+        if ok then add(cid) end
+    end
+    for _, sid in ipairs(UI.FindProfessionSkillLines(rec)) do add(sid) end
+    return ids
+end
+
+-- Есть ли чем пробовать открыть (для хинта иконки). Побочек нет.
+function UI.CanOpenProfession(rec)
+    return #UI.ProfessionOpenCandidates(rec) > 0
+end
+
+local function ProfessionsFrameShown()
+    local pf = _G.ProfessionsFrame
+    if pf and pf.IsShown then
+        local ok, v = pcall(pf.IsShown, pf)
+        if ok then return v and true or false end
     end
     return nil
 end
 
 -- Открывает окно профессии рецепта (клик по иконке).
--- Не изучена этим персонажем -> молча noop (штатный кейс).
--- API сломан / открытие не удалось при найденном skillLine -> статус + WARN в Diag.
+-- Не изучена этим персонажем -> молча noop (штатный кейс, без WARN).
+-- Изучена, но ни один кандидат не сработал -> статус + WARN в Diag со списком проб.
 function UI.OpenProfession(rec)
     if type(rec) ~= "table" then return false end
     local TS = C_TradeSkillUI
@@ -230,14 +282,31 @@ function UI.OpenProfession(rec)
         UI.SetStatus(L.ST_PROF_OPEN_FAIL, 1, 0.7, 0.2)
         return false
     end
-    local sid = UI.FindProfessionSkillLine(rec)
-    if not sid then return false end -- не изучена — noop по дизайну
-    local ok, opened = pcall(TS.OpenTradeSkill, sid)
-    if ok and opened then return true end
+    local learned = #UI.FindProfessionSkillLines(rec) > 0
+    local candidates = UI.ProfessionOpenCandidates(rec)
+    local tried = {}
+    for _, id in ipairs(candidates) do
+        tried[#tried + 1] = tostring(id)
+        local ok, opened = pcall(TS.OpenTradeSkill, id)
+        if ok and opened then return true end
+    end
+    -- Последний шанс: открыть конкретный рецепт (тянет окно профы за собой).
+    if TS.OpenRecipe then
+        for _, rid in ipairs({ rec.recipeID, rec.recipeSpellID }) do
+            if type(rid) == "number" then
+                tried[#tried + 1] = "recipe:" .. tostring(rid)
+                local ok = pcall(TS.OpenRecipe, rid)
+                if ok and ProfessionsFrameShown() then return true end
+            end
+        end
+    end
+    if not learned then
+        return false -- не изучена этим персонажем — noop по дизайну (в т.ч. рецепты др. персов)
+    end
     local D = _G.DecorLumberProfitDiag
     if D and D.Log then
-        pcall(D.Log, "WARN", "prof", "OpenTradeSkill failed sid=%s rec=%s",
-            tostring(sid), tostring(rec.recipeSpellID))
+        pcall(D.Log, "WARN", "prof", "open failed rec=%s tried=%s",
+            tostring(rec.recipeSpellID), table.concat(tried, ","))
     end
     UI.SetStatus(L.ST_PROF_OPEN_FAIL, 1, 0.7, 0.2)
     return false
@@ -271,7 +340,8 @@ function UI.UpdateHeaderArrows()
     if not UI.headerCells then return end
     for _, cell in ipairs(UI.headerCells) do
         local arrow = ""
-        if UI._sortKey == cell.key then arrow = UI._sortDesc and " ▼" or " ▲" end
+        -- ASCII-маркеры: ▲▼ отсутствуют в шрифте клиента (tofu-квадрат), ^/v есть всегда
+        if UI._sortKey == cell.key then arrow = UI._sortDesc and " v" or " ^" end
         cell.fs:SetText(cell.text .. arrow)
     end
 end
@@ -356,10 +426,95 @@ function UI.OnHeaderClick(key)
     UI.RefreshTable()
 end
 
+-- ==== Высота строк (настройка /dlp rowheight, персист в DB.settings.rowHeight) ====
+-- Высота тянет за собой шрифт строк и размер иконок (рецепт + профессия).
+UI.BASE_ROW_HEIGHT = 20 -- база (Config.UI.ROW_HEIGHT): шрифт 12pt, иконка 18px
+UI.BASE_ROW_FONT = 12
+UI.MIN_ROW_HEIGHT = 16
+UI.MAX_ROW_HEIGHT = 32
+UI._rowHeight = nil -- override из SavedVariables (LoadRowHeight при ADDON_LOADED)
+
+function UI.GetRowHeight()
+    local h = UI._rowHeight
+    if type(h) == "number" and h >= UI.MIN_ROW_HEIGHT and h <= UI.MAX_ROW_HEIGHT then
+        return math.floor(h)
+    end
+    local cfg = _G.DecorLumberProfitConfig
+    if cfg and cfg.UI and type(cfg.UI.ROW_HEIGHT) == "number" then
+        return cfg.UI.ROW_HEIGHT
+    end
+    return UI.BASE_ROW_HEIGHT
+end
+
+-- Применяет сохранённую высоту (вызывает Commands при ADDON_LOADED). Возвращает итог.
+function UI.LoadRowHeight()
+    UI._rowHeight = nil
+    local db = _G.DecorLumberProfitDB
+    local saved = db and db.settings and db.settings.rowHeight
+    if type(saved) == "number" and saved >= UI.MIN_ROW_HEIGHT and saved <= UI.MAX_ROW_HEIGHT then
+        UI._rowHeight = math.floor(saved)
+    end
+    return UI.GetRowHeight()
+end
+
+-- Меняет высоту строк + сносит пул (строки пересоздадутся). true при успехе.
+function UI.SetRowHeight(h)
+    h = tonumber(h)
+    if not h then return false end
+    h = math.floor(h)
+    if h < UI.MIN_ROW_HEIGHT or h > UI.MAX_ROW_HEIGHT then return false end
+    UI._rowHeight = h
+    local db = _G.DecorLumberProfitDB
+    if db and db.settings then db.settings.rowHeight = h end
+    if UI._rows then
+        for _, row in ipairs(UI._rows) do
+            if row.Hide then pcall(row.Hide, row) end
+        end
+        if table.wipe then table.wipe(UI._rows) else UI._rows = {} end
+    end
+    UI._lastRowCount = nil
+    local sf = UI._scrollFrame
+    if sf and sf.SetVerticalScroll then pcall(sf.SetVerticalScroll, sf, 0) end
+    if UI.RefreshRowHeightLabel then UI.RefreshRowHeightLabel() end
+    if UI._mainFrame then UI.RefreshTable() end
+    return true
+end
+
+-- Размер иконок строки (рецепт + профессия): высота строки минус паддинг (20 -> 18).
+function UI.RowIconSize()
+    return math.max(12, UI.GetRowHeight() - 2)
+end
+
+-- Обновляет цифру степпера в футере (если окно создано). Зовётся из SetRowHeight.
+function UI.RefreshRowHeightLabel()
+    local fs = UI._rowHeightLabel
+    if fs and fs.SetText then pcall(fs.SetText, fs, tostring(UI.GetRowHeight())) end
+end
+
+-- Масштабирует шрифт строки под высоту (база 12pt при 20px). Без клиента/шрифта — noop.
+local _rowFontPath, _rowFontFlags
+local function ApplyRowFont(fs)
+    if not (fs and fs.SetFont) then return end
+    if not _rowFontPath then
+        local gf = _G.GameFontHighlightSmall
+        if gf and gf.GetFont then
+            local ok, path, _, flags = pcall(gf.GetFont, gf)
+            if ok and type(path) == "string" then
+                _rowFontPath, _rowFontFlags = path, flags
+            end
+        end
+    end
+    if _rowFontPath then
+        local size = UI.BASE_ROW_FONT * UI.GetRowHeight() / UI.BASE_ROW_HEIGHT
+        pcall(fs.SetFont, fs, _rowFontPath, size, _rowFontFlags)
+    end
+end
+
 -- Создаёт строку таблицы (позиция выставляется при рендере — пул переиспользуется, Этап 9)
 -- Учитывает только видимые колонки (панель «Столбцы»); при смене видимости пул сносится.
 local function CreateRow(parent, width)
-    local ROW_H = DecorLumberProfitConfig.UI.ROW_HEIGHT
+    local ROW_H = UI.GetRowHeight()
+    local ICON_SZ = UI.RowIconSize()
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(width, ROW_H)
     row._dataIndex = 0
@@ -367,21 +522,23 @@ local function CreateRow(parent, width)
     -- Иконка предмета (Этап 9): только у колонки рецепта
     local icon = row:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("LEFT", 2, 0)
-    icon:SetSize(16, 16)
+    icon:SetSize(ICON_SZ, ICON_SZ)
     icon:Hide()
     row._icon = icon
 
     row.cols = {}
+    row._colX = {}
     local x = 0
     for _, c in ipairs(UI.GetVisibleColumns()) do
         local cw = UI.ColWidth(c.key, c.width)
+        row._colX[c.key] = x
         if c.key == "prof" then
             -- Иконка-кнопка профессии: клик открывает окно (если изучена), ховер — имя + подсказка
             local btn = CreateFrame("Button", nil, row)
             btn:SetPoint("LEFT", x + 1, 0)
             btn:SetSize(math.max(cw - 2, 20), ROW_H)
             local tex = btn:CreateTexture(nil, "OVERLAY")
-            tex:SetSize(16, 16)
+            tex:SetSize(ICON_SZ, ICON_SZ)
             tex:SetPoint("CENTER", 0, 0)
             tex:Hide()
             btn._icon = tex
@@ -390,6 +547,7 @@ local function CreateRow(parent, width)
             fb:SetJustifyH("CENTER")
             fb:SetText(L.CELL_PROF_UNKNOWN)
             fb:Hide()
+            ApplyRowFont(fb)
             btn._fallback = fb
             btn._rec = nil
             btn:RegisterForClicks("LeftButtonUp")
@@ -401,7 +559,7 @@ local function CreateRow(parent, width)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 local pname = (type(rec) == "table" and rec.profession) or nil
                 GameTooltip:AddLine(pname or L.CELL_PROF_UNKNOWN, 1, 1, 1)
-                if UI.FindProfessionSkillLine and UI.FindProfessionSkillLine(rec) then
+                if UI.CanOpenProfession and UI.CanOpenProfession(rec) then
                     GameTooltip:AddLine(L.TIP_PROF_OPEN_HINT, 0.6, 0.9, 0.6)
                 else
                     GameTooltip:AddLine(L.TIP_PROF_NOT_LEARNED, 0.7, 0.7, 0.7)
@@ -411,12 +569,17 @@ local function CreateRow(parent, width)
             btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
             row.cols[c.key] = btn
         else
-            local off = (c.key == "recipe") and 20 or 2 -- отступ под иконку
+            -- Рецепт: стартовый отступ минимальный (2). Реальный сдвиг под иконку
+            -- выставляет FillRow/LayoutRecipeCell: без иконки текст идёт от края
+            -- как шапка, с иконкой — после неё (ICON_SZ + 4). Фикс 20px давал
+            -- пустые 18px слева и обрезал названия ("Арденвельдский ф...").
+            local off = 2
             local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             fs:SetPoint("LEFT", x + off, 0)
             fs:SetSize(cw - off - 2, ROW_H)
             fs:SetJustifyH(c.align or "LEFT")
             fs:SetWordWrap(false)
+            ApplyRowFont(fs)
             row.cols[c.key] = fs
         end
         x = x + cw
@@ -451,18 +614,59 @@ local function EnsurePool(n)
     for i = n + 1, #rows do rows[i]:Hide() end
 end
 
+-- Раскладка ячейки рецепта: без иконки текст от края (как шапка, off=2),
+-- с иконкой — после неё (ICON_SZ + 4). Вызывается из FillRow/RenderEmpty,
+-- т.к. пул переиспользуется и статичный off=20 давал пустое место слева.
+local function LayoutRecipeCell(row, hasIcon)
+    local fs = row.cols and row.cols.recipe
+    if not fs then
+        if row._icon then row._icon:Hide() end
+        return
+    end
+    local ROW_H = UI.GetRowHeight()
+    local ICON_SZ = UI.RowIconSize()
+    local baseX = (row._colX and row._colX.recipe) or 0
+    local cw = UI.ColWidth("recipe", 150)
+    if hasIcon then
+        if row._icon then
+            if row._icon.SetSize then row._icon:SetSize(ICON_SZ, ICON_SZ) end
+            if row._icon.ClearAllPoints and row._icon.SetPoint then
+                row._icon:ClearAllPoints()
+                row._icon:SetPoint("LEFT", baseX + 2, 0)
+            end
+        end
+        local off = ICON_SZ + 4
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", baseX + off, 0)
+        fs:SetSize(math.max(cw - off - 2, 10), ROW_H)
+    else
+        if row._icon then row._icon:Hide() end
+        local off = 2
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", baseX + off, 0)
+        fs:SetSize(math.max(cw - off - 2, 10), ROW_H)
+    end
+end
+
 -- Заполнение одной строки данными (позиция — по dataIndex, не по месту в пуле)
 -- Все обращения к row.cols.* за гардами: колонка может быть скрыта через панель «Столбцы».
 local function FillRow(row, p, dataIndex)
-    local ROW_H = DecorLumberProfitConfig.UI.ROW_HEIGHT
+    local ROW_H = UI.GetRowHeight()
     row._dataIndex = dataIndex
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", 0, -(dataIndex - 1) * ROW_H)
     if row._bg then SetRowBG(row._bg, RowBGColor(dataIndex)) end
     local rec, eco = p.rec, p.eco
-    -- Иконка предмета
-    if row._icon then
-        if rec.icon then row._icon:SetTexture(rec.icon); row._icon:Show() else row._icon:Hide() end
+    -- Иконка предмета + сдвиг текста: место резервируем только если иконка есть.
+    -- Рецепт скрыт через «Столбцы» — иконку прячем, чтобы не лезла на соседнюю колонку.
+    if not row.cols.recipe then
+        if row._icon then row._icon:Hide() end
+    elseif rec.icon then
+        if row._icon then row._icon:SetTexture(rec.icon); row._icon:Show() end
+        LayoutRecipeCell(row, true)
+    else
+        if row._icon then row._icon:Hide() end
+        LayoutRecipeCell(row, false)
     end
     -- Рецепт
     if row.cols.recipe then
@@ -584,6 +788,9 @@ local function RenderEmpty(msg)
         fs._rec = nil
     end
     if row._icon then row._icon:Hide() end
+    -- Сбрасываем сдвиг рецепта: пустая строка всегда без иконки (иначе сообщение
+    -- унаследует off от прошлого FillRow с иконкой и будет с тем же отступом).
+    if row.cols.recipe then LayoutRecipeCell(row, false) end
     local vis = UI.GetVisibleColumns()
     local firstKey = vis[1] and vis[1].key or "recipe"
     if row.cols[firstKey] then
@@ -602,7 +809,7 @@ function UI.RenderVisibleRows()
     if not (UI._mainFrame and sc and sf) then return end
     local displayList = UI._displayList
     if #displayList == 0 then return end
-    local ROW_H = DecorLumberProfitConfig.UI.ROW_HEIGHT
+    local ROW_H = UI.GetRowHeight()
     local ok, offset = pcall(sf.GetVerticalScroll, sf)
     if not ok or type(offset) ~= "number" then offset = 0 end
     local first, count
@@ -752,7 +959,7 @@ function UI.RefreshTable()
 
     -- Обновить высоту скролла; позицию скролла сбрасываем только при смене числа строк,
     -- чтобы обновление цен не прыгало к началу списка
-    local h = math.max(#displayList, 1) * DecorLumberProfitConfig.UI.ROW_HEIGHT
+    local h = math.max(#displayList, 1) * UI.GetRowHeight()
     scrollChild:SetSize(TableWidth(), h)
     local scrollFrame = UI._scrollFrame
     if scrollFrame and UI._lastRowCount ~= #displayList then

@@ -177,6 +177,14 @@ function Core:MarkLearnedBy(spellID)
     if S and S.MarkLearnedBy then return S.MarkLearnedBy(spellID) end
 end
 
+-- NEW_RECIPE_LEARNED несёт recipeID (9.0.1+), база keyed by recipeSpellID:
+-- мэппинг обоих неймспейсов + пометка в памяти и в DB (см. Store).
+function Core:ApplyLearnedByEvent(list, eventID)
+    local S = _G.DecorLumberProfitStore
+    if S and S.ApplyLearnedByEvent then return S.ApplyLearnedByEvent(list, eventID) end
+    return 0
+end
+
 function Core:LoadSavedRecipes()
     local S = _G.DecorLumberProfitStore
     if S and S.LoadSavedRecipes then return S.LoadSavedRecipes() end

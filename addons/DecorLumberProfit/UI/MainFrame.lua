@@ -183,6 +183,38 @@ local function CreateMainFrame()
     end)
     btnColumns:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    -- Высота строк (футер, справа от «Столбцы»): подпись + степпер [-] значение [+].
+    -- Дублирует /dlp rowheight: шаг 2, границы 16..32, персист в DB.settings.rowHeight.
+    local rowsLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rowsLabel:SetPoint("LEFT", btnColumns, "RIGHT", 10, 0)
+    rowsLabel:SetText(L.ROWS_LABEL)
+    local btnRowMinus = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btnRowMinus:SetSize(24, 22)
+    btnRowMinus:SetPoint("LEFT", rowsLabel, "RIGHT", 4, 0)
+    btnRowMinus:SetText("-")
+    btnRowMinus:SetScript("OnClick", function() UI.SetRowHeight(UI.GetRowHeight() - 2) end)
+    local rowVal = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rowVal:SetPoint("LEFT", btnRowMinus, "RIGHT", 4, 0)
+    rowVal:SetSize(22, 22)
+    rowVal:SetJustifyH("CENTER")
+    UI._rowHeightLabel = rowVal
+    local btnRowPlus = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btnRowPlus:SetSize(24, 22)
+    btnRowPlus:SetPoint("LEFT", rowVal, "RIGHT", 4, 0)
+    btnRowPlus:SetText("+")
+    btnRowPlus:SetScript("OnClick", function() UI.SetRowHeight(UI.GetRowHeight() + 2) end)
+    local function RowStepperTip(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(L.TIP_ROWHEIGHT_TITLE)
+        GameTooltip:AddLine(L.TIP_ROWHEIGHT_L1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end
+    btnRowMinus:SetScript("OnEnter", RowStepperTip)
+    btnRowMinus:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    btnRowPlus:SetScript("OnEnter", RowStepperTip)
+    btnRowPlus:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    UI.RefreshRowHeightLabel()
+
     -- Статус
     local statusText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     statusText:SetPoint("TOPLEFT", 18, -62)

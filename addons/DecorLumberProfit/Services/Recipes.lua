@@ -165,6 +165,33 @@ for _ri, _ru in ipairs(PROF_BASE_RU) do
     if _en and PROF_ICONS[_en] and not PROF_ICONS[_ru] then PROF_ICONS[_ru] = PROF_ICONS[_en] end
 end
 
+-- Классические ID профессий для C_TradeSkillUI.OpenTradeSkill (открывает окно профы).
+-- Expansion-варианты skillLine (напр. 2907) OpenTradeSkill НЕ открывает (возвращает false),
+-- рабочие ID — классика 164/165/171... (подтверждено сообществом для актуального клиента).
+local PROF_CLASSIC_IDS = {
+    ["First Aid"] = 129, ["Blacksmithing"] = 164, ["Leatherworking"] = 165,
+    ["Alchemy"] = 171, ["Cooking"] = 185, ["Herbalism"] = 182,
+    ["Mining"] = 186, ["Tailoring"] = 197, ["Engineering"] = 202,
+    ["Fishing"] = 356, ["Enchanting"] = 333, ["Skinning"] = 393,
+    ["Jewelcrafting"] = 755, ["Inscription"] = 773, ["Archaeology"] = 794,
+    -- Carpentry (Midnight): классического ID нет — только через Enum/skillLine-кандидаты
+}
+
+-- Классический ID профессии по имени (EN/RU, варианты дополнений).
+-- Чистая функция (тестируема без клиента). nil если нет (Carpentry, неизвестное).
+function Recipes.GetClassicProfessionID(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    local norm = Recipes.NormalizeProfessionName(name)
+    if type(norm) ~= "string" then return nil end
+    if PROF_CLASSIC_IDS[norm] then return PROF_CLASSIC_IDS[norm] end
+    for i, ru in ipairs(PROF_BASE_RU) do
+        if ru == norm and PROF_BASE_EN[i] then
+            return PROF_CLASSIC_IDS[PROF_BASE_EN[i]]
+        end
+    end
+    return nil
+end
+
 -- Иконка профессии по имени (строка) или записи рецепта ({profession=...}).
 -- Нормализует RU-варианты ("Зандаларское кузнечное дело" -> "Blacksmithing").
 -- Чистая функция (тестируема без клиента). Возвращает путь текстуры или nil.
@@ -697,8 +724,11 @@ local function TryGetActiveRecipeSpellIDs()
                         local dOk, d = pcall(dp.GetEntryAt, dp, i)
                         if dOk then data = d end
                     end
-                    local rid = data and (data.recipeID or data.recipeSpellID or data.spellID
-                        or (data.recipeInfo and (data.recipeInfo.recipeID or data.recipeInfo.recipeSpellID)))
+                    -- Вниз по коду нужны recipeSpellID (GetRecipeSchematic/GetRecipeInfo):
+                    -- при наличии обоих берём spellID, recipeID — только за неимением
+                    -- (namespace события NEW_RECIPE_LEARNED, для прямого вызова не годится).
+                    local rid = data and (data.recipeSpellID or data.spellID or data.recipeID
+                        or (data.recipeInfo and (data.recipeInfo.recipeSpellID or data.recipeInfo.recipeID)))
                     if type(rid)=="number" and not seen[rid] then
                         seen[rid]=true; table.insert(ids, rid)
                     end

@@ -17,6 +17,7 @@ DecorLumberProfitLocale = {
         CHK_HIDE_UNLEARNED = "Hide unlearned",
         BTN_COLUMNS = "Columns",
         BTN_SHOW_ALL_COLUMNS = "Show all",
+        ROWS_LABEL = "Rows:",
 
         -- Тултипы кнопок
         TIP_REFRESH_TITLE = "Add recipes from the active window",
@@ -36,6 +37,8 @@ DecorLumberProfitLocale = {
         TIP_HIDE_UNLEARNED = "Hides recipes that are not learned by any character on the account.",
         TIP_COLUMNS_TITLE = "Table columns",
         TIP_COLUMNS_L1 = "Choose which columns to show. At least one must stay visible. Saved for the account.",
+        TIP_ROWHEIGHT_TITLE = "Row height",
+        TIP_ROWHEIGHT_L1 = "Row height (font and icons scale with it). Steps of 2, from 16 to 32. Saved for the account. Same as /dlp rowheight.",
 
         -- Колонки таблицы
         HEAD_RECIPE = "Recipe",
@@ -133,8 +136,10 @@ DecorLumberProfitLocale = {
         PRINT_ADDED = "Added %d recipes from the active window (total %d).",
         PRINT_ITEMS_RESOLVED = "Item data loaded: added %d recipes (bind checked).",
         PRINT_LOADED = "Loaded. Type /dlp to open the calculator. Lumber types tracked: %d",
-        PRINT_HELP = "Commands: /dlp — open window, /dlp help — help, /dlp reset — reset cache, /dlp clear — clear table, /dlp scan — add from active window, /dlp multirealm on|off — cross-realm tooltip, /dlp locale ru|en|auto — language",
+        PRINT_HELP = "Commands: /dlp — open window, /dlp help — help, /dlp reset — reset cache, /dlp clear — clear table, /dlp scan — add from active window, /dlp rowheight <16-32> — row height, /dlp multirealm on|off — cross-realm tooltip, /dlp locale ru|en|auto — language",
         PRINT_MULTIREALM_SET = "Multi-realm tooltip: %s (saved, no /reload needed).",
+        PRINT_ROWHEIGHT_SET = "Row height: %s (saved, no /reload needed).",
+        PRINT_ROWHEIGHT_USAGE = "Usage: /dlp rowheight <16-32>",
         DEBUG_HELP = "Diagnostics: /dlp debug — status, /dlp debug selftest — in-game checks, /dlp bug — copy-paste bundle, /dlp debug skipped — recipes skipped as unsellable",
         PRINT_VERBOSE_SET = "Verbose logging: %s (saved, no /reload needed).",
         PRINT_SCAN_SET = "Scan setting %s = %s (saved, no /reload needed).",
@@ -165,6 +170,7 @@ DecorLumberProfitLocale = {
         CHK_HIDE_UNLEARNED = "Скрыть неизученное",
         BTN_COLUMNS = "Столбцы",
         BTN_SHOW_ALL_COLUMNS = "Показать все",
+        ROWS_LABEL = "Строки:",
 
         -- Тултипы кнопок
         TIP_REFRESH_TITLE = "Добавить рецепты из активного окна",
@@ -184,6 +190,8 @@ DecorLumberProfitLocale = {
         TIP_HIDE_UNLEARNED = "Скрывает рецепты, которые не изучены ни на одном персонаже аккаунта.",
         TIP_COLUMNS_TITLE = "Столбцы таблицы",
         TIP_COLUMNS_L1 = "Выберите, какие столбцы показывать. Хотя бы один должен остаться видимым. Сохраняется для аккаунта.",
+        TIP_ROWHEIGHT_TITLE = "Высота строк",
+        TIP_ROWHEIGHT_L1 = "Высота строк таблицы (шрифт и иконки масштабируются). Шаг 2, от 16 до 32. Сохраняется для аккаунта. То же, что /dlp rowheight.",
 
         -- Колонки таблицы
         HEAD_RECIPE = "Рецепт",
@@ -281,8 +289,10 @@ DecorLumberProfitLocale = {
         PRINT_ADDED = "Добавлено %d рецептов из активного окна (всего %d).",
         PRINT_ITEMS_RESOLVED = "Догружены данные предметов: добавлено %d рецептов (привязка проверена).",
         PRINT_LOADED = "Загружен. Введите /dlp для открытия калькулятора. Типов древесины: %d",
-        PRINT_HELP = "Команды: /dlp — открыть окно, /dlp help — справка, /dlp reset — сброс кэша, /dlp clear — очистить таблицу, /dlp scan — добавить из активного окна, /dlp multirealm on|off — тултип по всем серверам, /dlp locale ru|en|auto — язык",
+        PRINT_HELP = "Команды: /dlp — открыть окно, /dlp help — справка, /dlp reset — сброс кэша, /dlp clear — очистить таблицу, /dlp scan — добавить из активного окна, /dlp rowheight <16-32> — высота строк, /dlp multirealm on|off — тултип по всем серверам, /dlp locale ru|en|auto — язык",
         PRINT_MULTIREALM_SET = "Мультиреалм-тултип: %s (сохранено, /reload не нужен).",
+        PRINT_ROWHEIGHT_SET = "Высота строк: %s (сохранено, /reload не нужен).",
+        PRINT_ROWHEIGHT_USAGE = "Использование: /dlp rowheight <16-32>",
         DEBUG_HELP = "Диагностика: /dlp debug — статус, /dlp debug selftest — проверки в игре, /dlp bug — блок для копипасты, /dlp debug skipped — рецепты, пропущенные как непродаваемые",
         PRINT_VERBOSE_SET = "Подробные логи: %s (сохранено, /reload не нужен).",
         PRINT_SCAN_SET = "Настройка сканирования %s = %s (сохранено, /reload не нужен).",
