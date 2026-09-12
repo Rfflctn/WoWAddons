@@ -7,7 +7,7 @@ _G.DecorLumberProfit = _G.DecorLumberProfit or {}
 local Addon = _G.DecorLumberProfit
 
 Addon.NAME = "DecorLumberProfit"
-Addon.VERSION = "2.0.0" -- держать в sync с ## Version в .toc (чеклист релиза, Этап 10)
+Addon.VERSION = "2.0.1" -- держать в sync с ## Version в .toc (чеклист релиза, Этап 10)
 Addon.DB_SCHEMA = 2 -- realm-scoped auction cache + per-character owned auctions
 
 local unpack = unpack or table.unpack -- WoW: Lua 5.1 global; тесты: lupa 5.4 table.unpack

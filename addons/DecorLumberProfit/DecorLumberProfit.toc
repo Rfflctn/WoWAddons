@@ -2,7 +2,7 @@
 ## Title: DecorLumberProfit
 ## Notes: Калькулятор рентабельности рецептов с древесиной (ru/en). Считает себестоимость, прибыль и макс. цену древесины по данным аукциона.
 ## Author: Muse Spark
-## Version: 2.0.0
+## Version: 2.0.1
 ## SavedVariables: DecorLumberProfitDB
 ## SavedVariablesPerCharacter: DecorLumberProfitCharDB
 ## IconTexture: 134400

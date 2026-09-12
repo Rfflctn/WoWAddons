@@ -317,6 +317,54 @@ local ZEBRA_EVEN  = { 0.15, 0.15, 0.15, 0.4 }
 local ZEBRA_ODD   = { 0.08, 0.08, 0.08, 0.4 }
 local ZEBRA_HOVER = { 0.25, 0.25, 0.10, 0.5 }
 
+-- Обрезка краёв иконок (стандарт WoW: у текстур предметов пустая рамка 1-2px).
+-- Без TexCoord иконка выглядит «мыльной» и визуально расширяет отступ колонки.
+local function ApplyIconCrop(tex)
+    if tex and tex.SetTexCoord then
+        pcall(tex.SetTexCoord, tex, 0.08, 0.92, 0.08, 0.92)
+    end
+end
+UI.ApplyIconCrop = ApplyIconCrop
+
+-- Вертикальные разделители колонок: тонкая 1px линия (текстура, мышь не ловит).
+local DIVIDER_COLOR = { 0.55, 0.55, 0.55, 0.28 }
+
+-- Расставляет разделители на границах видимых колонок (зовётся из CreateRow).
+-- Пул строк сносится при смене видимости/ширины/высоты, поэтому статичных
+-- позиций достаточно — пересоздадутся вместе со строкой.
+local function LayoutRowDividers(row, rowH)
+    if not (row and row._colX) then return end
+    row._dividers = row._dividers or {}
+    local vis = UI.GetVisibleColumns()
+    local nDiv = math.max(#vis - 1, 0)
+    for i = 1, nDiv do
+        local div = row._dividers[i]
+        if not div then
+            if row.CreateTexture then
+                local ok, tex = pcall(row.CreateTexture, row, nil, "OVERLAY")
+                if ok then div = tex end
+            end
+            row._dividers[i] = div
+        end
+        local boundX = vis[i + 1] and row._colX[vis[i + 1].key]
+        if div and div.SetSize and type(boundX) == "number" then
+            if div.SetColorTexture then
+                pcall(div.SetColorTexture, div, DIVIDER_COLOR[1], DIVIDER_COLOR[2], DIVIDER_COLOR[3], DIVIDER_COLOR[4])
+            end
+            pcall(div.SetSize, div, 1, rowH)
+            if div.ClearAllPoints and div.SetPoint then
+                pcall(div.ClearAllPoints, div)
+                pcall(div.SetPoint, div, "LEFT", boundX, 0)
+            end
+            if div.Show then pcall(div.Show, div) end
+        end
+    end
+    for i = nDiv + 1, #row._dividers do
+        local div = row._dividers[i]
+        if div and div.Hide then pcall(div.Hide, div) end
+    end
+end
+
 local function RowBGColor(index)
     return (index % 2 == 0) and ZEBRA_EVEN or ZEBRA_ODD
 end
@@ -519,10 +567,13 @@ local function CreateRow(parent, width)
     row:SetSize(width, ROW_H)
     row._dataIndex = 0
 
-    -- Иконка предмета (Этап 9): только у колонки рецепта
+    -- Иконка предмета (Этап 9): только у колонки рецепта.
+    -- Обрезана через ApplyIconCrop, якорь/размер правит LayoutRecipeCell,
+    -- чтобы без иконки текст шёл от края как шапка (без пустого отступа).
     local icon = row:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("LEFT", 2, 0)
     icon:SetSize(ICON_SZ, ICON_SZ)
+    ApplyIconCrop(icon)
     icon:Hide()
     row._icon = icon
 
@@ -540,6 +591,7 @@ local function CreateRow(parent, width)
             local tex = btn:CreateTexture(nil, "OVERLAY")
             tex:SetSize(ICON_SZ, ICON_SZ)
             tex:SetPoint("CENTER", 0, 0)
+            ApplyIconCrop(tex)
             tex:Hide()
             btn._icon = tex
             local fb = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -590,6 +642,8 @@ local function CreateRow(parent, width)
     bg:SetAllPoints()
     SetRowBG(bg, ZEBRA_ODD)
     row._bg = bg
+    -- Вертикальные разделители между столбцами (поверх фона, под текстом по уровню OVERLAY)
+    LayoutRowDividers(row, ROW_H)
     -- Ховер
     row:SetScript("OnEnter", function(self)
         SetRowBG(bg, ZEBRA_HOVER)
@@ -662,7 +716,11 @@ local function FillRow(row, p, dataIndex)
     if not row.cols.recipe then
         if row._icon then row._icon:Hide() end
     elseif rec.icon then
-        if row._icon then row._icon:SetTexture(rec.icon); row._icon:Show() end
+        if row._icon then
+            row._icon:SetTexture(rec.icon)
+            ApplyIconCrop(row._icon)
+            row._icon:Show()
+        end
         LayoutRecipeCell(row, true)
     else
         if row._icon then row._icon:Hide() end
@@ -681,6 +739,7 @@ local function FillRow(row, p, dataIndex)
         if btn._icon and btn._fallback then
             if path then
                 btn._icon:SetTexture(path)
+                ApplyIconCrop(btn._icon)
                 btn._icon:Show()
                 btn._fallback:Hide()
             else

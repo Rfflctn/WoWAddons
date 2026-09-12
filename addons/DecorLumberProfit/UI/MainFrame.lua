@@ -267,12 +267,15 @@ local function CreateMainFrame()
     }
     local x = 0
     UI.headerCells = {}
+    UI.headerDividers = {}
     for _, c in ipairs(UI.COLUMNS) do
         local btn = CreateFrame("Button", nil, header)
         local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         fs:SetPoint("LEFT", 2, 0)
         fs:SetPoint("RIGHT", -2, 0)
-        fs:SetJustifyH(c.align == "CENTER" and "CENTER" or "LEFT")
+        -- Все заголовки по центру (п.2): выравнивание колонки (c.align)
+        -- влияет только на ячейки строк, шапка всегда CENTER.
+        fs:SetJustifyH("CENTER")
         fs:SetWordWrap(false)
         fs:SetText(labels[c.key])
         fs:SetTextColor(1, 0.82, 0)
@@ -332,11 +335,14 @@ end
 
 -- Перераскладка шапки под текущие ширины колонок (Этап 9: ресайз)
 -- Учитывает видимость (панель «Столбцы»): скрытые кнопки прячем, видимые сдвигаем влево.
+-- Вертикальные разделители между видимыми колонками (п.3): 1px линии в цвет
+-- подчёркивания шапки; позиции пересчитываются здесь же (ресайз/скрытие колонок).
 function UI.LayoutHeaderCells()
     if not UI.headerCells then return end
     local byKey = {}
     for _, cell in ipairs(UI.headerCells) do byKey[cell.key] = cell end
     local x = 0
+    local bounds = {} -- x-координаты левых границ видимых колонок (для разделителей)
     for _, c in ipairs(UI.COLUMNS) do
         local cell = byKey[c.key]
         if cell then
@@ -350,11 +356,39 @@ function UI.LayoutHeaderCells()
                     cell.btn:ClearAllPoints()
                     cell.btn:SetPoint("LEFT", x, 0)
                 end
+                bounds[#bounds + 1] = x
                 x = x + w
             end
         end
     end
     if UI._headerFrame then UI._headerFrame:SetSize(math.max(x, 1), 20) end
+    -- Разделители: на каждой границе кроме самой левой (bounds[2..N]).
+    UI.headerDividers = UI.headerDividers or {}
+    local header = UI._headerFrame
+    local need = math.max(#bounds - 1, 0)
+    for i = 1, need do
+        local div = UI.headerDividers[i]
+        if not div and header and header.CreateTexture then
+            local ok, tex = pcall(header.CreateTexture, header, nil, "OVERLAY")
+            if ok then div = tex end
+            UI.headerDividers[i] = div
+        end
+        if div and div.SetSize then
+            if div.SetColorTexture then
+                pcall(div.SetColorTexture, div, 1, 0.82, 0, 0.22)
+            end
+            pcall(div.SetSize, div, 1, 20)
+            if div.ClearAllPoints and div.SetPoint then
+                pcall(div.ClearAllPoints, div)
+                pcall(div.SetPoint, div, "LEFT", bounds[i + 1] or 0, 0)
+            end
+            if div.Show then pcall(div.Show, div) end
+        end
+    end
+    for i = need + 1, #UI.headerDividers do
+        local div = UI.headerDividers[i]
+        if div and div.Hide then pcall(div.Hide, div) end
+    end
     UI.UpdateHeaderArrows()
 end
 
