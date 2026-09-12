@@ -79,11 +79,12 @@
    для версии — `check_version.py`. Новые WoW API, события, UI и аукцион требуют
    также ручного smoke-test в клиенте или явной отметки, что он не выполнен.
 10. Не изменять несвязанные файлы, не откатывать существующие изменения, не запускать
-    `fetch_*.py`, не коммитить и не отправлять изменения без явного запроса пользователя.
+    `wiki-lua/fetch_*.py`, не коммитить и не отправлять изменения без явного запроса пользователя.
 
 ## Поддерживающие скрипты
 
 - `tools/find-api.ps1 <query> [-Max N]` — поиск функции/события/метода виджета: имя, файл:строка, аргументы, возврат (~500 токенов вместо тысяч).
 - `tools/build-index.ps1` — перегенерировать `wiki-lua/INDEX-api.md` (после обновления blizzard_api_doc).
 - `python tools/check_version.py` — проверить `.toc`, `Init.lua` и последний release CHANGELOG.
+- `python tools/check_docs.py` — проверить дрейф доков: число `test_*.py` и их упоминания в PROJECT-INDEX, существование файлов `wiki-lua/*.md` и `tools/*`, на которые ссылаются AGENTS.md/PROJECT-INDEX.md.
 - `wiki-lua/fetch_wiki.py`, `wiki-lua/fetch_pages.py`, `wiki-lua/fetch_blizzard_api_doc.py` — скачивание доков (нужен internet).

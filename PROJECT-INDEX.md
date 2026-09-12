@@ -1,17 +1,17 @@
 # PROJECT-INDEX.md — быстрый ориентир для агентов (читать ПЕРВЫМ, ~1 мин)
 
 > Источник истины по маршрутизации — `AGENTS.md`. Этот файл — только карта.
-> Патч: Retail 12.1.0 / Midnight. Обновлено: 2026-09-11 (релиз 2.0.0: 20×Lua, виртуализация, ресайз).
+> Патч: Retail 12.1.0 / Midnight. Обновлено: 2026-09-12 (релиз 2.0.0 от 2026-09-10: 20×Lua, виртуализация, ресайз).
 > **Правило слоёв:** §0–§2 — читать всегда. §3 (`wiki-lua/`) — ТОЛЬКО если задача прошла гейт ниже.
 
-## 0. Дерево (корень `W:\Projects\WoW Addons\`)
+## 0. Дерево (корень `W:\Projects\WoWAddons\`)
 
 ```
 AGENTS.md                  # маршрутизация и жёсткие правила (читать вторым)
 PROJECT-INDEX.md           # этот файл
 opencode.json              # конфиг модели (lmstudio, локалка)
 addons/DecorLumberProfit/   # ЕДИНСТВЕННЫЙ аддон с кодом (TOC + 20×Lua: см. §2)
-tools/                     # поиск API, проверки, тесты: run_tests.py + tests/test_*.py (11 сьютов)
+tools/                     # поиск API, проверки, тесты: run_tests.py + tests/test_*.py (12 сьютов)
 wiki-lua/                  # архив доков (~8 тыс. файлов) — СМ. ГЕЙТ В §1, по умолчанию НЕ трогать
 ```
 
@@ -40,13 +40,13 @@ wiki-lua/                  # архив доков (~8 тыс. файлов) —
 - `addons/DecorLumberProfit/Services/Diag.lua` — диагностика: `Diag.Log` (уровни ERROR/WARN/INFO/VERBOSE), `lastError`, `SubsystemStatus`, `/dlp debug status|selftest|verbose on|off`, `/dlp bug` (бандл для issue).
 - `addons/DecorLumberProfit/Locales.lua` — тексты `enUS`/`ruRU` (`L[]`/`TL()`).
 - `addons/DecorLumberProfit/README.md` — ТЗ, формулы, установка; `CHANGELOG.md` — только версионные блоки `## [X.Y.Z] - YYYY-MM-DD`, одна кодовая сессия = один блок (детали — `AGENTS.md` п.7–8).
-- Проверки после правок Lua: `python tools/syntax_check.py` → `python tools/run_tests.py` → `python tools/check_locales.py` (строгий: missing/diff/fmt = FAIL). Кодовую сессию начинать с `python tools/check_version.py`, заканчивать бампом `.toc` + `Init.lua` + CHANGELOG (+ `test_init.py`, там версия захардкожена) и повторным `check_version.py`. `tools/smoke_test.py` — legacy (загрузчик синхронизирован с `.toc`, гейтом не является).
-- Тесты: `tools/tests/stub.lua` (стабы WoW, STUB v1) + `tools/tests/test_*.py`: `test_money`, `test_economy`, `test_recipes` (Scan active/all, ветки ошибок, флаги), `test_prices`, `test_wood` (+parity Wood≡Config), `test_diag`, `test_init` (контракт SafeCall!), `test_iteminfo`, `test_store` (Upgrade/adopt/cap), `test_tableview` (VisibleRange, ColWidth), `test_removed_apis` (denylist удалённых Midnight-API: lupa-стабы их не ловят). Порядок загрузки Lua читается из `.toc`, у каждого сьюта свежий рантайм (изоляции, зависимости между сьютами запрещены).
+- Проверки после правок Lua: `python tools/syntax_check.py` → `python tools/run_tests.py` → `python tools/check_locales.py` (строгий: missing/diff/fmt = FAIL). Кодовую сессию начинать с `python tools/check_version.py`, заканчивать бампом `.toc` + `Init.lua` + CHANGELOG (+ `test_init.py`, там версия захардкожена) и повторным `check_version.py`. `tools/smoke_test.py` — legacy (загрузчик синхронизирован с `.toc`, гейтом не является). Мета-проверка дрейфа доков: `python tools/check_docs.py` (сьюты/ссылки).
+- Тесты: `tools/tests/stub.lua` (стабы WoW, STUB v1) + `tools/tests/test_*.py`: `test_money`, `test_economy`, `test_recipes` (Scan active/all, ветки ошибок, флаги), `test_prices`, `test_wood` (+parity Wood≡Config), `test_diag`, `test_init` (контракт SafeCall!), `test_iteminfo`, `test_store` (Upgrade/adopt/cap), `test_learned_persist` (learned-флаг: recipeID-мэппинг, roundtrip, холодный логин), `test_tableview` (VisibleRange, ColWidth), `test_removed_apis` (denylist удалённых Midnight-API: lupa-стабы их не ловят). Порядок загрузки Lua читается из `.toc`, у каждого сьюта свежий рантайм (изоляции, зависимости между сьютами запрещены).
 - Пути относительные от корня; абсолютных `W:\...` быть не должно. Имя папки аддона = имени `.toc`.
 
 ## 3. wiki-lua/ — ON-DEMAND (читать раздел ТОЛЬКО при гейте «нужна»)
 
-Состав (замерено): `*.md` (69) — статьи/how-to; `blizzard_api_doc/` (612×.lua) — официальные доки клиента;
+Состав (замерено): `*.md` (69: 67 статей/how-to + служебные `INDEX-api.md` и `README.md`); `blizzard_api_doc/` (612×.lua) — официальные доки клиента;
 `INDEX-api.md` (~9900 записей) — grep-индекс; `pages/api/` (6197×.md) — примеры; `pages/events/` (2054×.md).
 
 | Нужно | Действие (не читать файлы целиком!) |
