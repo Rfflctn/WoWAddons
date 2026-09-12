@@ -13,6 +13,7 @@ opencode.json              # конфиг модели (lmstudio, локалка
 addons/DecorLumberProfit/   # ЕДИНСТВЕННЫЙ аддон с кодом (TOC + 20×Lua: см. §2)
 tools/                     # поиск API, проверки, тесты: run_tests.py + tests/test_*.py (12 сьютов)
 wiki-lua/                  # архив доков (~8 тыс. файлов) — СМ. ГЕЙТ В §1, по умолчанию НЕ трогать
+.temp/                     # временные рабочие файлы агента (см. AGENTS.md п.11), в git не коммитится
 ```
 
 ## 1. Гейт: нужна ли wiki-lua? (ответь за 5 секунд)
@@ -63,6 +64,6 @@ wiki-lua/                  # архив доков (~8 тыс. файлов) —
 (`14_world_of_warcraft_api.md`, `22_scripts.md`, `34_console_variables.md`, `20_events.md`,
 `15_widget_api.md`, `80_api_changes_12.1.0.md`, `INDEX-api.md`, `pages/api/Global functions.md`) —
 только `Select-String` с контекстом ≤ 20 строк. Игнор: `__pycache__/`, `wiki-lua/batch*.json`,
-`wiki-lua/pages/progress.log`, `docs/wow_addons/*.html`. Отсутствие функции в `pages/api/`
+`wiki-lua/pages/progress.log`, `.temp/`, `docs/wow_addons/*.html`. Отсутствие функции в `pages/api/`
 НЕ значит отсутствие в игре — истина в `blizzard_api_doc/`. `wiki-lua/fetch_*.py` — только для
 перекачки доков (нужен internet), в обычной работе не запускать.

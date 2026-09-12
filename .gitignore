@@ -12,3 +12,6 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+
+# Временные рабочие файлы агента (см. AGENTS.md п.11) — не коммитить
+.temp/

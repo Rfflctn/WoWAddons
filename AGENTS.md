@@ -40,7 +40,7 @@
    `wiki-lua/pages/api/Global functions.md`, `wiki-lua/pages/api/World of Warcraft API*.md`,
    `wiki-lua/80_api_changes_12.1.0.md`, `wiki-lua/INDEX-api.md`.
 2. **Игнорировать:** `docs/wow_addons/` и `docs/wow_addons/*.html` (если появятся — мусор скрейпера),
-    `__pycache__/`, `wiki-lua/batch*.json`, `wiki-lua/pages/progress.log`.
+    `__pycache__/`, `wiki-lua/batch*.json`, `wiki-lua/pages/progress.log`, `.temp/` (рабочие файлы агента).
 3. Для `C_*`, глобальных функций, событий, констант и Enum **всегда сначала
    `tools/find-api.ps1`**, а не ручной поиск по 612 файлам.
 4. `wiki-lua/pages/api/` — вспомогательный и неполный архив; если функции там нет,
@@ -80,6 +80,11 @@
    также ручного smoke-test в клиенте или явной отметки, что он не выполнен.
 10. Не изменять несвязанные файлы, не откатывать существующие изменения, не запускать
     `wiki-lua/fetch_*.py`, не коммитить и не отправлять изменения без явного запроса пользователя.
+11. Временные файлы — ТОЛЬКО в `.temp/` в корне проекта. ЗАПРЕЩЕНО использовать системные
+    temp-папки (`%TEMP%\opencode*`, `C:\Users\...\AppData\Local\Temp\opencode*`, `/tmp/opencode*`):
+    не создавать, не читать, не писать туда. Весь временный вывод (выгрузки команд,
+    черновики, промежуточные файлы) — в `.temp/`. Папка `.temp/` внесена в `.gitignore`
+    и не коммитится.
 
 ## Поддерживающие скрипты
 
