@@ -59,7 +59,7 @@ DecorLumberProfitStore.MarkLearnedBy(424242)
 ''')
     check('loaded count 1', '#LOADED', '1')
     check('loaded name', 'LOADED[1].name', 'Craft Oak Output')
-    check('mark learnedBy Tester', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+    check('mark learnedBy Tester', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Tester-TestRealm"])', 'true')
     check('get saved recipe', 'DecorLumberProfitStore.GetSavedRecipe(424242).name', 'Craft Oak Output')
     check('get saved nil', 'tostring(DecorLumberProfitStore.GetSavedRecipe(1) == nil)', 'true')
 
@@ -146,7 +146,7 @@ DecorLumberProfitDB.recipes = {}
 DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424242, name="R", learned=true })
 ''')
     check('save learned=true persists', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
-    check('save marks self learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+    check('save marks self learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Tester-TestRealm"])', 'true')
     exec_(r'''
 OLD_UNITNAME = UnitName
 UnitName = function() return "Alt" end
@@ -154,8 +154,8 @@ DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424242, name="R", learned=fals
 UnitName = OLD_UNITNAME
 ''')
     check('alt scan keeps anyone-learned', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
-    check('alt recorded unlearned', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Alt)', 'false')
-    check('self still learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+    check('alt recorded unlearned', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Alt-TestRealm"])', 'false')
+    check('self still learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Tester-TestRealm"])', 'true')
     exec_(r'''
 LOAD_ME = DecorLumberProfitStore.LoadSavedRecipes()
 UnitName = function() return "Alt" end
@@ -168,7 +168,7 @@ UnitName = OLD_UNITNAME
 DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424242, name="R" })
 ''')
     check('nil learned does not wipe', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
-    check('nil learned keeps learners', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+    check('nil learned keeps learners', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Tester-TestRealm"])', 'true')
 
     # ---- RefreshLearnedFlags сохраняет оба направления в DB ----
     exec_(r'''
@@ -181,7 +181,7 @@ UnitName = OLD_UNITNAME
 C_TradeSkillUI.GetRecipeInfo = OLD_GETINFO
 ''')
     check('refresh persists unlearned in-memory', 'tostring(RL_ALT[1].learned)', 'false')
-    check('refresh records alt unlearned', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Alt)', 'false')
+    check('refresh records alt unlearned', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Alt-TestRealm"])', 'false')
     check('refresh keeps anyone-learned', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
 
     # ---- HasOtherLearners игнорирует false-записи ----
@@ -200,7 +200,7 @@ DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424243, name="Legacy", learned
 UnitName = OLD_U_LEG
 ''')
     check('legacy learned survives alt scan', 'tostring(DecorLumberProfitDB.recipes[424243].learned)', 'true')
-    check('legacy alt false recorded', 'tostring(DecorLumberProfitDB.recipes[424243].learnedBy.Alt)', 'false')
+    check('legacy alt false recorded', 'tostring(DecorLumberProfitDB.recipes[424243].learnedBy["Alt-TestRealm"])', 'false')
     exec_(r'''
 OLD_GET_LEG = C_TradeSkillUI.GetRecipeInfo
 UnitName = function() return "Alt" end
@@ -212,3 +212,30 @@ C_TradeSkillUI.GetRecipeInfo = OLD_GET_LEG
 ''')
     check('legacy learned survives alt refresh', 'tostring(DecorLumberProfitDB.recipes[424243].learned)', 'true')
     check('legacy refresh alt unlearned in memory', 'tostring(RL_LEG[1].learned)', 'false')
+
+    # ---- PlayerKey "Имя-Реалм": тёзка с другого реалма не затирает владельца ----
+    check('player key qualified', 'DecorLumberProfitStore.PlayerKey()', 'Tester-TestRealm')
+    exec_(r'''
+DecorLumberProfitDB.recipes[424245] = nil
+DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424245, name="Tezka", learned=true })
+OLD_TR = TEST_REALM
+OLD_TRN = TEST_REALM_NAME
+TEST_REALM = "OtherRealm"
+TEST_REALM_NAME = "Other Realm"
+OLD_GET_TEZ = C_TradeSkillUI.GetRecipeInfo
+C_TradeSkillUI.GetRecipeInfo = function(id) return { learned = false } end
+RL_TEZ = { { recipeSpellID = 424245, learned = true } }
+DecorLumberProfitStore.RefreshLearnedFlags(RL_TEZ)
+C_TradeSkillUI.GetRecipeInfo = OLD_GET_TEZ
+TEST_REALM = OLD_TR
+TEST_REALM_NAME = OLD_TRN
+''')
+    check('tezka keeps owner flag', 'tostring(DecorLumberProfitDB.recipes[424245].learnedBy["Tester-TestRealm"])', 'true')
+    check('tezka records own realm key', 'tostring(DecorLumberProfitDB.recipes[424245].learnedBy["Tester-OtherRealm"])', 'false')
+    check('tezka keeps anyone-learned', 'tostring(DecorLumberProfitDB.recipes[424245].learned)', 'true')
+    exec_(r'''
+LOAD_TEZ = DecorLumberProfitStore.LoadSavedRecipes()
+TEZ_MINE = nil
+for _, r in ipairs(LOAD_TEZ) do if r.recipeSpellID == 424245 then TEZ_MINE = r.learned end end
+''')
+    check('tezka load restores owner learned', 'tostring(TEZ_MINE)', 'true')

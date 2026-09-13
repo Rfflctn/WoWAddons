@@ -42,6 +42,23 @@ local function RealmContext()
     return normalized, display or normalized
 end
 
+-- Ключ персонажа в learnedBy: "Имя-Реалм". Ники уникальны только в пределах
+-- реалма — тёзка с другого реалма писал бы в тот же bare-ключ и затирал чужой
+-- флаг (владелец "забывался" каждым визитом тёзки). Пишем всегда qualified;
+-- читаем qualified, затем legacy bare (сейвы до пер-реалм учёта).
+-- (После RealmContext: локал выше по файлу здесь не виден.)
+local function PlayerKey()
+    local name = CurrentPlayer()
+    local realm = RealmContext()
+    if type(name) == "string" and name ~= "" and name ~= "player"
+        and type(realm) == "string" and realm ~= "" then
+        return name .. "-" .. realm
+    end
+    return name
+end
+
+Store.PlayerKey = PlayerKey -- публичный геттер (тесты/диагностика)
+
 -- Есть ли хоть один персонаж, знающий рецепт (значения learnedBy — явные boolean)
 local function HasAnyLearner(learnedBy)
     if type(learnedBy) ~= "table" then return false end
@@ -262,7 +279,7 @@ function Store.SerializeRecipe(rec)
 end
 
 -- Сохраняет snapshot рецепта в общую базу (account-wide).
--- learned — пер-персонажный флаг: learnedBy[player]=true — знает, =false —
+-- learned — пер-персонажный флаг: learnedBy["Имя-Реалм"]=true — знает, =false —
 -- проверено, что НЕ знает; записи ДРУГИХ персонажей не трогаем.
 -- ser.learned — "знает хоть кто-то" (OR по learnedBy, legacy-фолбэк для старых сейвов).
 -- rec.learned == nil (API не ответил) — learned/learnedBy не трогаем, прежнее не затираем.
@@ -303,7 +320,7 @@ function Store.SaveRecipe(rec)
         ser.learnedBy = {}
         ser.savedAt = Now()
     end
-    local player = CurrentPlayer()
+    local player = PlayerKey()
     if rec.learned == true then
         ser.learnedBy[player] = true
         ser.learned = true
@@ -330,7 +347,7 @@ function Store.MarkLearnedBy(spellID)
     local ser = db[spellID]
     if not ser then return end
     ser.learnedBy = ser.learnedBy or {}
-    ser.learnedBy[CurrentPlayer()] = true
+    ser.learnedBy[PlayerKey()] = true
     ser.learned = true
 end
 
@@ -342,7 +359,7 @@ end
 -- Возвращает число применённых пометок (0 — совпадений нет).
 function Store.ApplyLearnedByEvent(list, eventID)
     if eventID == nil then return 0 end
-    local player = CurrentPlayer()
+    local player = PlayerKey()
     local marks = 0
     local function markSer(ser)
         if type(ser) ~= "table" then return end
@@ -407,10 +424,12 @@ function Store.LoadSavedRecipes()
                     end
                 end
             end
-            -- learned текущего персонажа: приоритет — его запись в learnedBy,
+            -- learned текущего персонажа: приоритет — его запись в learnedBy
+            -- ("Имя-Реалм"), затем legacy bare-ник (сейвы до пер-реалм учёта),
             -- иначе legacy-фолбэк ser.learned (сейвы до пер-персонажного учёта)
             if type(ser.learnedBy) == "table" then
-                local mine = ser.learnedBy[CurrentPlayer()]
+                local mine = ser.learnedBy[PlayerKey()]
+                if mine == nil then mine = ser.learnedBy[CurrentPlayer()] end
                 if mine ~= nil then rec.learned = mine and true or false end
             else
                 rec.learnedBy = {}
@@ -464,7 +483,7 @@ function Store.RefreshLearnedFlags(list)
         if Addon and Addon.SafeCall then return Addon.SafeCall(func, ...) end
         return nil
     end
-    local player = CurrentPlayer()
+    local player = PlayerKey()
     for _, rec in ipairs(list) do
         if rec.recipeSpellID then
             local info = sc(C_TradeSkillUI.GetRecipeInfo, rec.recipeSpellID)

@@ -25,14 +25,27 @@ function UI.HasOtherLearners(rec)
 end
 
 -- Имена персонажей, знающих рецепт: отсортированный список ключей learnedBy == true.
+-- Ключи qualified ("Имя-Реалм"); суффикс реалма скрываем, когда имя однозначно
+-- (тёзок с других реалмов среди знающих нет), иначе показываем полностью.
 -- Чистая функция (тесты). Пустой массив — никто не знает / данных нет.
 function UI.GetLearnerNames(rec)
     local out = {}
     if type(rec) ~= "table" then return out end
     local lb = rec.learnedBy
     if type(lb) ~= "table" then return out end
+    local full, bareCount = {}, {}
     for name, v in pairs(lb) do
         if v == true and type(name) == "string" and name ~= "" then
+            full[#full + 1] = name
+            local bare = name:match("^(.-)%-[^%-]+$") or name
+            bareCount[bare] = (bareCount[bare] or 0) + 1
+        end
+    end
+    for _, name in ipairs(full) do
+        local bare = name:match("^(.-)%-[^%-]+$") or name
+        if bare ~= name and (bareCount[bare] or 0) == 1 then
+            out[#out + 1] = bare
+        else
             out[#out + 1] = name
         end
     end

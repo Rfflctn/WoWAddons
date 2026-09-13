@@ -26,7 +26,7 @@ def run(lua, check, exec_):
     exec_('MARKS_DB = DecorLumberProfitStore.ApplyLearnedByEvent(nil, 1001)')
     check('event marks db entry', 'tostring(MARKS_DB >= 1)', 'true')
     check('db learned true', 'tostring(DecorLumberProfitDB.recipes[424242].learned)', 'true')
-    check('db marks self learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
+    check('db marks self learner', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Tester-TestRealm"])', 'true')
     exec_('LOAD_LP = DecorLumberProfitStore.LoadSavedRecipes()')
     check('load shows learned', 'tostring(LOAD_LP[1].learned)', 'true')
 
@@ -92,8 +92,8 @@ for _, rec in ipairs(RESOLVED_LP) do DecorLumberProfitStore.SaveRecipe(rec) end
     check('cold login pending 1', 'COLD_PENDING', '1')
     check('resolved batch 1', '#RESOLVED_LP', '1')
     check('refresh restores true in memory', 'tostring(RESOLVED_LP[1].learned)', 'true')
-    check('refresh persists true in db', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
-    check('alt false preserved', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Alt)', 'false')
+    check('refresh persists true in db', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Tester-TestRealm"])', 'true')
+    check('alt false preserved', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy["Alt-TestRealm"])', 'false')
 
     # ---- legacy-строка без learnedBy (сейвы до 2.1.0): чужой false не стирает anyone-флаг ----
     exec_(r'''
@@ -109,4 +109,29 @@ UnitName = OLD_UNITNAME_LP
 C_TradeSkillUI.GetRecipeInfo = OLD_GETINFO_LP2
 ''')
     check('legacy anyone-flag survives alt refresh', 'tostring(DecorLumberProfitDB.recipes[424244].learned)', 'true')
-    check('legacy alt refresh records alt', 'tostring(DecorLumberProfitDB.recipes[424244].learnedBy.Alt)', 'false')
+    check('legacy alt refresh records alt', 'tostring(DecorLumberProfitDB.recipes[424244].learnedBy["Alt-TestRealm"])', 'false')
+
+    # ---- legacy bare-ник читается текущим персонажем (фолбэк до пер-реалм учёта) ----
+    exec_(r'''
+OLD_U_BARE = UnitName
+UnitName = function() return "Bob" end
+DecorLumberProfitDB.recipes[424246] = { recipeSpellID=424246, recipeID=1003, name="Bare",
+    outputItemID=999002, learned=true, learnedBy={ Bob=true },
+    reagents={ { itemID=256963, quantity=2 } } }
+LOAD_BARE = DecorLumberProfitStore.LoadSavedRecipes()
+BARE_MINE = nil
+for _, r in ipairs(LOAD_BARE) do if r.recipeSpellID == 424246 then BARE_MINE = r.learned end end
+UnitName = OLD_U_BARE
+''')
+    check('legacy bare name matches current char', 'tostring(BARE_MINE)', 'true')
+
+    # ---- GetLearnerNames: суффикс реалма скрывается, если имя однозначно ----
+    check('learner display strips unique realm',
+          'table.concat(DecorLumberProfitUI.GetLearnerNames({ learnedBy = { ["Tester-TestRealm"] = true } }), ",")',
+          'Tester')
+    check('learner display keeps realm on collision',
+          'table.concat(DecorLumberProfitUI.GetLearnerNames({ learnedBy = { ["Bob-A"] = true, ["Bob-B"] = true } }), ",")',
+          'Bob-A,Bob-B')
+    check('learner display keeps legacy bare',
+          'table.concat(DecorLumberProfitUI.GetLearnerNames({ learnedBy = { Bob = true } }), ",")',
+          'Bob')

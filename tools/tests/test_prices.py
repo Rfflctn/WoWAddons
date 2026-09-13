@@ -161,3 +161,86 @@ DecorLumberProfitPrices.InitializeRealm()
 OLD_OTHER_PRICE = DecorLumberProfitPrices.GetCachedPrice(700203, "OtherRealm")
 ''')
     check('other realm old price persists', 'OLD_OTHER_PRICE', '71000')
+
+    # ---- write-path: qty из того же чтения, что и цена (построчный фолбэк) ----
+    exec_(r'''
+OLD_CQ = C_AuctionHouse.GetCommoditySearchResultsQuantity
+OLD_CN = C_AuctionHouse.GetNumCommoditySearchResults
+OLD_CI = C_AuctionHouse.GetCommoditySearchResultInfo
+OLD_IQ = C_AuctionHouse.GetItemSearchResultsQuantity
+OLD_IN = C_AuctionHouse.GetNumItemSearchResults
+OLD_II = C_AuctionHouse.GetItemSearchResultInfo
+-- totals-qty молчит, строки есть (3 лота x2 шт): построчная сумма 6
+C_AuctionHouse.GetCommoditySearchResultsQuantity = function(id) return nil end
+C_AuctionHouse.GetNumCommoditySearchResults = function(id)
+    if id == 700310 then return 3 end
+    return 0
+end
+C_AuctionHouse.GetCommoditySearchResultInfo = function(id, i)
+    if id == 700310 and i >= 1 and i <= 3 then return { unitPrice = 1000 * i, quantity = 2 } end
+    return nil
+end
+P_ROWQ = DecorLumberProfitPrices.TryUpdateFromCache(700310)
+E_ROWQ = DecorLumberProfitDB.priceCache.TestRealm[700310]
+''')
+    check('row fallback price', 'P_ROWQ', '1000')
+    check('row fallback qty is row sum', 'E_ROWQ.qty', '6')
+    check('row fallback listings is row count', 'E_ROWQ.listings', '3')
+    exec_(r'''
+-- totals есть: побеждают totals, построчная сумма не используется
+C_AuctionHouse.GetCommoditySearchResultsQuantity = function(id)
+    if id == 700311 then return 100 end
+    return nil
+end
+C_AuctionHouse.GetNumCommoditySearchResults = function(id)
+    if id == 700311 then return 3 end
+    return 0
+end
+C_AuctionHouse.GetCommoditySearchResultInfo = function(id, i)
+    if id == 700311 and i >= 1 and i <= 3 then return { unitPrice = 500, quantity = 2 } end
+    return nil
+end
+DecorLumberProfitPrices.TryUpdateFromCache(700311)
+E_TOTQ = DecorLumberProfitDB.priceCache.TestRealm[700311]
+''')
+    check('totals qty wins over rows', 'E_TOTQ.qty', '100')
+    exec_(r'''
+-- лотов > 15 и totals-qty нет: неполную сумму не пишем, цена пишется
+C_AuctionHouse.GetNumCommoditySearchResults = function(id)
+    if id == 700312 then return 20 end
+    return 0
+end
+C_AuctionHouse.GetCommoditySearchResultInfo = function(id, i)
+    if id == 700312 and i >= 1 and i <= 20 then return { unitPrice = 700, quantity = 5 } end
+    return nil
+end
+DecorLumberProfitPrices.TryUpdateFromCache(700312)
+E_BIGQ = DecorLumberProfitDB.priceCache.TestRealm[700312]
+''')
+    check('big result price written', 'E_BIGQ.price', '700')
+    check('big result partial sum not used', 'tostring(E_BIGQ.qty)', 'nil')
+    exec_(r'''
+-- item-путь: totals-qty молчит, 2 строки: цена min(buyout), qty = сумма
+C_AuctionHouse.GetCommoditySearchResultsQuantity = function(id) return 0 end
+C_AuctionHouse.GetNumCommoditySearchResults = function(id) return 0 end
+C_AuctionHouse.GetItemSearchResultsQuantity = function(key) return nil end
+C_AuctionHouse.GetNumItemSearchResults = function(key)
+    if key and key.itemID == 700313 then return 2 end
+    return 0
+end
+C_AuctionHouse.GetItemSearchResultInfo = function(key, i)
+    if key and key.itemID == 700313 and i == 1 then return { buyoutAmount = 900, quantity = 1 } end
+    if key and key.itemID == 700313 and i == 2 then return { buyoutAmount = 1500, quantity = 4 } end
+    return nil
+end
+P_IROWQ = DecorLumberProfitPrices.TryUpdateFromCache(700313)
+E_IROWQ = DecorLumberProfitDB.priceCache.TestRealm[700313]
+C_AuctionHouse.GetCommoditySearchResultsQuantity = OLD_CQ
+C_AuctionHouse.GetNumCommoditySearchResults = OLD_CN
+C_AuctionHouse.GetCommoditySearchResultInfo = OLD_CI
+C_AuctionHouse.GetItemSearchResultsQuantity = OLD_IQ
+C_AuctionHouse.GetNumItemSearchResults = OLD_IN
+C_AuctionHouse.GetItemSearchResultInfo = OLD_II
+''')
+    check('item row fallback price', 'P_IROWQ', '900')
+    check('item row fallback qty is row sum', 'E_IROWQ.qty', '5')

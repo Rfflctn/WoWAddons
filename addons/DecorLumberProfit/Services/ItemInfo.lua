@@ -52,7 +52,10 @@ function ItemInfo.GetBindType(itemID)
         if ok and b ~= nil then bind = b end
     end
     if bind == nil and _G.GetItemInfo then
-        bind = select(14, GetItemInfo(itemID))
+        -- Глобальный GetItemInfo без гарда ронял всех вызывающих (PruneUnsellable
+        -- из RefreshTable, LoadSavedRecipes): taint в Midnight = ошибка вместо nil.
+        local ok, b = pcall(function(id) return select(14, GetItemInfo(id)) end, itemID)
+        if ok then bind = b end
     end
     return bind
 end
@@ -93,7 +96,10 @@ function ItemInfo.GetName(itemID)
         local ok, n = pcall(C_Item.GetItemInfo, itemID)
         if ok then name = n end
     end
-    if not name and _G.GetItemInfo then name = GetItemInfo(itemID) end
+    if not name and _G.GetItemInfo then
+        local ok, n = pcall(_G.GetItemInfo, itemID)
+        if ok then name = n end
+    end
     if name then ItemInfo._nameCache[itemID] = name end
     return name
 end

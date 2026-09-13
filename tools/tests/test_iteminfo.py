@@ -67,3 +67,22 @@ PRUNED = DecorLumberProfitItemInfo.PruneUnsellable(PRUNE_LIST)
     # names
     check('getname caches', 'DecorLumberProfitItemInfo.GetName(999002)', 'Sellable')
     check('healthcheck ok', 'tostring(DecorLumberProfitItemInfo.HealthCheck().ok)', 'true')
+    # API предмета кидает (taint в Midnight): bind/name отдают nil, prune не роняет вызывающих
+    exec_(r'''
+OLD_CITEM_PC = C_Item.GetItemInfo
+OLD_GITEM_PC = GetItemInfo
+C_Item.GetItemInfo = function(id) error("taint") end
+GetItemInfo = function(id) error("taint") end
+PCALL_BIND = DecorLumberProfitItemInfo.GetBindType(777099)
+PCALL_UNSELL = DecorLumberProfitItemInfo.IsUnsellable(777099)
+PCALL_NAME = DecorLumberProfitItemInfo.GetName(777099)
+PCALL_LIST = { { recipeSpellID=401, outputItemID=777099 } }
+PCALL_PRUNED = DecorLumberProfitItemInfo.PruneUnsellable(PCALL_LIST)
+C_Item.GetItemInfo = OLD_CITEM_PC
+GetItemInfo = OLD_GITEM_PC
+''')
+    check('bind taint -> nil, not throw', 'tostring(PCALL_BIND)', 'nil')
+    check('unsellable taint -> nil (pending)', 'tostring(PCALL_UNSELL)', 'nil')
+    check('getname taint -> nil, not throw', 'tostring(PCALL_NAME)', 'nil')
+    check('prune taint -> 0, not throw', 'PCALL_PRUNED', '0')
+    check('prune taint keeps recipe', 'PCALL_LIST[1].recipeSpellID', '401')

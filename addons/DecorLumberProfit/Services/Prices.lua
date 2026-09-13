@@ -401,7 +401,6 @@ function Auction.ClearPriceCache(realmKey)
     local requestedRealm = realmKey
     realmKey = realmKey or EnsureRealm()
     if not realmKey then return end
-    priceCache = {}
     lastPriceUpdate = nil
     if DecorLumberProfitDB then
         DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
@@ -414,6 +413,9 @@ function Auction.ClearPriceCache(realmKey)
             DecorLumberProfitDB.priceUpdatedAtByRealm = {}
         end
     end
+    -- Память смотрит на тот же (пустой) бакет, что и SV: иначе priceCache и
+    -- DB.priceCache[realm] — разные таблицы, и записи расползаются.
+    priceCache = RealmBucket(realmKey) or {}
 end
 
 function Auction.IsPending(itemID) return pending[itemID] end
@@ -486,8 +488,12 @@ local function GetBrowseIndex()
 end
 -- Минимальная цена по первым N результатам (ограничиваем 15 для производительности).
 -- Все вызовы API за pcall: в Midnight методы могут кидать (taint/secret) — скан не должен рваться.
+-- Вторым возвратом — построчная сумма info.quantity: фолбэк количества, когда
+-- totals-API (Get*SearchResultsQuantity) не отдал qty, а строки читаются.
+-- Сумма точна, только если просканированы ВСЕ строки (num <= 15) — иначе её
+-- использовать нельзя (неполная сумма хуже отсутствия); вызывающий решает.
 local function GetMinPrice(count, getInfo, extractPrice)
-    local minPrice = nil
+    local minPrice, rowQty = nil, 0
     local limit = math.min(count or 0, 15)
     for i = 1, limit do
         local ok, info = pcall(getInfo, i)
@@ -497,9 +503,22 @@ local function GetMinPrice(count, getInfo, extractPrice)
                 p = p and tonumber(p)
                 if p and (not minPrice or p < minPrice) then minPrice = p end
             end
+            local q = (type(info) == "table" and tonumber(info.quantity)) or nil
+            if q then rowQty = rowQty + q end
         end
     end
-    return minPrice
+    return minPrice, rowQty
+end
+
+-- Построчный фолбэк qty: цена и количество должны происходить из одного чтения,
+-- иначе запись рождается "цена без количества" и на других реалмах застывает
+-- навсегда (пересканировать чужой реалм отсюда нельзя). Точный только при
+-- num <= 15 (все строки просканированы); при большем num молча не применяем.
+local function FallbackRowQty(qty, num, rowQty)
+    if qty == nil and num ~= nil and num <= 15 and (rowQty or 0) > 0 then
+        return rowQty
+    end
+    return qty
 end
 
 local function UpdatePriceFromCommodity(itemID)
@@ -507,12 +526,12 @@ local function UpdatePriceFromCommodity(itemID)
     -- Только Safe-версии (внутри pcall): прямые вызовы без гардов рвали весь скан при ошибке API.
     local qty, num = SafeCommodityQuantity(itemID)
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
-    local minPrice = GetMinPrice(num, function(i)
+    local minPrice, rowQty = GetMinPrice(num, function(i)
         if not C_AuctionHouse.GetCommoditySearchResultInfo then return nil end
         return C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
     end, function(info) return info.unitPrice end)
     if minPrice then
-        Auction.SetPrice(itemID, minPrice, "commodity", qty, num)
+        Auction.SetPrice(itemID, minPrice, "commodity", FallbackRowQty(qty, num, rowQty), num)
         return minPrice
     end
     return nil
@@ -522,7 +541,7 @@ local function UpdatePriceFromItem(itemKey, itemID)
     if not C_AuctionHouse then return nil end
     local qty, num = SafeItemQuantity(itemKey)
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
-    local minPrice = GetMinPrice(num, function(i)
+    local minPrice, rowQty = GetMinPrice(num, function(i)
         if not C_AuctionHouse.GetItemSearchResultInfo then return nil end
         return C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
     end, function(info) return info.buyoutAmount or info.minBid end)
@@ -534,6 +553,7 @@ local function UpdatePriceFromItem(itemKey, itemID)
         if br then minPrice = br.minPrice; browseQty = br.totalQuantity end
     end
     if minPrice then
+        if qty == nil then qty = FallbackRowQty(qty, num, rowQty) end
         if qty == nil then qty = browseQty end
         Auction.SetPrice(itemID, minPrice, "item", qty, num)
         return minPrice
