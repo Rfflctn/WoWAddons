@@ -52,7 +52,7 @@ DecorLumberProfitLocale = {
         HEAD_WOODQTY = "Wood",
         HEAD_MAXPRICE = "Wood price",
         HEAD_PROFIT = "Profit",
-        HINT_RECIPE = "Click to sort by recipe name.",
+        HINT_RECIPE = "Click header to sort. Click recipe name — open in profession, Shift+Click with auction open — search output.",
         HINT_PROF = "Profession that crafts the item. Click the icon to open it (if learned by this character). Click header to sort.",
         HINT_LEARNED = "Characters that learned the recipe (names, comma-separated). Click to sort.",
         HINT_WOOD = "Which lumber the recipe consumes. Click to sort.",
@@ -76,6 +76,11 @@ DecorLumberProfitLocale = {
         TIP_PROF_OPEN_HINT = "Click — open profession",
         TIP_PROF_NOT_LEARNED = "Not learned by this character",
         ST_PROF_OPEN_FAIL = "Failed to open profession window.",
+        TIP_RECIPE_OPEN_HINT = "Click — open recipe in profession",
+        TIP_RECIPE_AH_HINT = "Shift+Click with auction open — search crafted item",
+        ST_RECIPE_OPEN_FAIL = "Failed to open recipe window.",
+        ST_AH_NOT_OPEN = "Open the auction house, then Shift+Click the recipe to search its item.",
+        ST_AH_NO_ITEM = "This recipe has no crafted item to search.",
 
         -- Тултип строки
         TIP_RECIPE_FALLBACK = "Recipe",
@@ -206,7 +211,7 @@ DecorLumberProfitLocale = {
         HEAD_WOODQTY = "Древ.",
         HEAD_MAXPRICE = "Цена др.",
         HEAD_PROFIT = "Прибыль",
-        HINT_RECIPE = "Клик — сортировка по имени рецепта.",
+        HINT_RECIPE = "Клик по шапке — сортировка. Клик по рецепту — открыть в профессии, Shift+клик при открытом аукционе — найти предмет.",
         HINT_PROF = "Профессия, в которой создаётся предмет. Клик по иконке — открыть (если изучена этим персонажем). Клик по шапке — сортировка.",
         HINT_LEARNED = "Кто изучил рецепт — имена персонажей через запятую. Клик — сортировка.",
         HINT_WOOD = "Какая древесина расходуется в рецепте. Клик — сортировка.",
@@ -230,6 +235,11 @@ DecorLumberProfitLocale = {
         TIP_PROF_OPEN_HINT = "Клик — открыть профессию",
         TIP_PROF_NOT_LEARNED = "Не изучена этим персонажем",
         ST_PROF_OPEN_FAIL = "Не удалось открыть окно профессии.",
+        TIP_RECIPE_OPEN_HINT = "Клик — открыть рецепт в профессии",
+        TIP_RECIPE_AH_HINT = "Shift+клик при открытом аукционе — найти предмет",
+        ST_RECIPE_OPEN_FAIL = "Не удалось открыть окно рецепта.",
+        ST_AH_NOT_OPEN = "Откройте аукцион, затем Shift+клик по рецепту, чтобы найти его предмет.",
+        ST_AH_NO_ITEM = "У рецепта нет предмета для поиска.",
 
         -- Тултип строки
         TIP_RECIPE_FALLBACK = "Рецепт",

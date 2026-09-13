@@ -312,6 +312,186 @@ function UI.OpenProfession(rec)
     return false
 end
 
+-- ==== Колонка рецепта: ссылка (клик — открыть, Shift+клик — аукцион) ====
+-- Клик открывает рецепт в окне профессии (C_TradeSkillUI.OpenRecipe по
+-- rec.recipeID, фолбэк rec.recipeSpellID, затем UI.OpenProfession).
+-- Shift+клик при открытом аукционе линкует крафтовый предмет в поиск АХ
+-- (ChatEdit_InsertLink -> SearchBox -> SendBrowseQuery, по наличию API).
+-- Все вызовы WoW за pcall; провал обязательного API — WARN в Diag (п.6 AGENTS).
+
+-- Кандидаты recipeID для C_TradeSkillUI.OpenRecipe (он принимает recipeID,
+-- а НЕ recipeSpellID; в старых сейвах они могут совпадать — без дублей).
+-- Чистая функция (тесты).
+function UI.RecipeOpenCandidates(rec)
+    local ids = {}
+    if type(rec) ~= "table" then return ids end
+    for _, rid in ipairs({ rec.recipeID, rec.recipeSpellID }) do
+        if type(rid) == "number" and rid ~= 0 then
+            local dup = false
+            for _, v in ipairs(ids) do if v == rid then dup = true; break end end
+            if not dup then ids[#ids + 1] = rid end
+        end
+    end
+    return ids
+end
+
+-- Открыт ли аукцион (Midnight: AuctionHouseFrame; legacy AuctionFrame — фолбэк).
+-- Побочек нет.
+function UI.IsAuctionHouseShown()
+    local ah = _G.AuctionHouseFrame
+    if ah and ah.IsShown then
+        local ok, v = pcall(ah.IsShown, ah)
+        if ok and v then return true end
+    end
+    local legacy = _G.AuctionFrame
+    if legacy and legacy.IsShown then
+        local ok, v = pcall(legacy.IsShown, legacy)
+        if ok and v then return true end
+    end
+    return false
+end
+
+-- Ссылка крафтового предмета рецепта (|Hitem:...|h) или nil (нет данных/ID).
+-- Побочек нет.
+function UI.GetRecipeItemLink(rec)
+    if type(rec) ~= "table" then return nil end
+    local itemID = rec.outputItemID
+    if type(itemID) ~= "number" then return nil end
+    if C_Item and C_Item.GetItemInfo then
+        local ok, _, link = pcall(C_Item.GetItemInfo, itemID)
+        if ok and type(link) == "string" and link ~= "" then return link end
+    end
+    if _G.GetItemInfo then
+        local ok, _, link = pcall(_G.GetItemInfo, itemID)
+        if ok and type(link) == "string" and link ~= "" then return link end
+    end
+    return nil
+end
+
+-- Имя крафтового предмета для поиска на АХ или nil. Побочек нет.
+function UI.GetRecipeSearchText(rec)
+    if type(rec) ~= "table" then return nil end
+    local itemID = rec.outputItemID
+    if type(itemID) ~= "number" then return nil end
+    local M = _G.DecorLumberProfitItemInfo
+    if M and M.GetName then
+        local ok, n = pcall(M.GetName, itemID)
+        if ok and type(n) == "string" and n ~= "" then return n end
+    end
+    if C_Item and C_Item.GetItemInfo then
+        local ok, n = pcall(C_Item.GetItemInfo, itemID)
+        if ok and type(n) == "string" and n ~= "" then return n end
+    end
+    if _G.GetItemInfo then
+        local ok, n = pcall(_G.GetItemInfo, itemID)
+        if ok and type(n) == "string" and n ~= "" then return n end
+    end
+    return nil
+end
+
+-- Линкует крафтовый предмет рецепта в поиск аукциона (Shift+клик).
+-- Без открытого АХ или без предмета — статус-подсказка + false (штатный кейс).
+-- Успех — true (текст в строке поиска и/или запущенный поиск).
+function UI.SearchAuctionForOutput(rec)
+    if type(rec) ~= "table" then return false end
+    local itemID = rec.outputItemID
+    if type(itemID) ~= "number" then
+        UI.SetStatus(L.ST_AH_NO_ITEM, 1, 0.7, 0.2)
+        return false
+    end
+    if not UI.IsAuctionHouseShown() then
+        UI.SetStatus(L.ST_AH_NOT_OPEN, 1, 0.7, 0.2)
+        return false
+    end
+    local link = UI.GetRecipeItemLink and UI.GetRecipeItemLink(rec) or nil
+    local name = UI.GetRecipeSearchText and UI.GetRecipeSearchText(rec) or nil
+    -- 1) Стандарт Blizzard: вставка ссылки в открытое поле (поиск АХ подхватывает сам).
+    if type(link) == "string" and link ~= "" then
+        if _G.ChatEdit_InsertLink then
+            local ok, handled = pcall(_G.ChatEdit_InsertLink, link)
+            if ok and handled then return true end
+        end
+        if _G.HandleModifiedItemClick then
+            local ok, handled = pcall(_G.HandleModifiedItemClick, link)
+            if ok and handled then return true end
+        end
+    end
+    -- 2) Прямая установка текста поиска АХ (визуальная линковка) + запуск поиска.
+    local searchText = (type(name) == "string" and name ~= "" and name)
+        or (type(link) == "string" and link ~= "" and link) or nil
+    if type(searchText) == "string" and searchText ~= "" then
+        local ah = _G.AuctionHouseFrame
+        local box = ah and ah.SearchBar and ah.SearchBar.SearchBox or nil
+        if not box and ah and ah.SearchBar and ah.SearchBar.SetText then
+            box = ah.SearchBar -- вариант сборки, где SearchBar сам EditBox
+        end
+        if box and box.SetText then
+            local ok = pcall(box.SetText, box, searchText)
+            if ok then
+                if C_AuctionHouse and C_AuctionHouse.SendBrowseQuery then
+                    pcall(C_AuctionHouse.SendBrowseQuery, {
+                        searchString = searchText, sorts = {},
+                        minLevel = nil, maxLevel = nil, filters = nil, itemClassFilters = nil,
+                    })
+                end
+                return true
+            end
+        end
+        -- 3) Коробки нет (другая сборка АХ), но имя есть: хотя бы запускаем поиск,
+        -- чтобы стоимость была видна в результатах.
+        if type(name) == "string" and name ~= "" and C_AuctionHouse and C_AuctionHouse.SendBrowseQuery then
+            local ok = pcall(C_AuctionHouse.SendBrowseQuery, {
+                searchString = name, sorts = {},
+                minLevel = nil, maxLevel = nil, filters = nil, itemClassFilters = nil,
+            })
+            if ok then return true end
+        end
+    end
+    local D = _G.DecorLumberProfitDiag
+    if D and D.Log then
+        pcall(D.Log, "WARN", "recipe-link", "AH link failed item=%s", tostring(itemID))
+    end
+    UI.SetStatus(L.ST_AH_NO_ITEM, 1, 0.7, 0.2)
+    return false
+end
+
+-- Открывает рецепт в окне профессии (клик по названию).
+-- Сначала точечный OpenRecipe (тянет окно + фокус на рецепте), фолбэк —
+-- UI.OpenProfession (открывает окно профы; изученность/статус/WARN — там).
+function UI.OpenRecipe(rec)
+    if type(rec) ~= "table" then return false end
+    local TS = C_TradeSkillUI
+    if TS and TS.OpenRecipe then
+        for _, rid in ipairs(UI.RecipeOpenCandidates(rec)) do
+            pcall(TS.OpenRecipe, rid)
+            if ProfessionsFrameShown() then return true end
+        end
+    end
+    if UI.OpenProfession then
+        return UI.OpenProfession(rec)
+    end
+    local D = _G.DecorLumberProfitDiag
+    if D and D.Log then
+        pcall(D.Log, "WARN", "recipe-link", "open failed rec=%s (no API)", tostring(rec.recipeSpellID))
+    end
+    UI.SetStatus(L.ST_RECIPE_OPEN_FAIL, 1, 0.7, 0.2)
+    return false
+end
+
+-- Маршрутизация клика по названию рецепта: Shift (+открытый АХ) — поиск
+-- предмета на аукционе, иначе — открыть рецепт. Возвращает результат действия.
+function UI.HandleRecipeClick(rec, isShift)
+    if type(rec) ~= "table" then return false end
+    if isShift then
+        if UI.IsAuctionHouseShown() then
+            return UI.SearchAuctionForOutput(rec)
+        end
+        UI.SetStatus(L.ST_AH_NOT_OPEN, 1, 0.7, 0.2)
+        return false
+    end
+    return UI.OpenRecipe(rec)
+end
+
 -- Зебра/ховер строк
 local ZEBRA_EVEN  = { 0.15, 0.15, 0.15, 0.4 }
 local ZEBRA_ODD   = { 0.08, 0.08, 0.08, 0.4 }
@@ -588,7 +768,74 @@ local function CreateRow(parent, width)
     for _, c in ipairs(UI.GetVisibleColumns()) do
         local cw = UI.ColWidth(c.key, c.width)
         row._colX[c.key] = x
-        if c.key == "prof" then
+        if c.key == "recipe" then
+            -- Ссылка рецепта: клик — открыть в профе, Shift+клик — поиск на АХ.
+            -- Кнопка с текстом от края колонки (иконки нет, как шапка).
+            local btn = CreateFrame("Button", nil, row)
+            btn:SetPoint("LEFT", x + 2, 0)
+            btn:SetSize(math.max(cw - 4, 20), ROW_H)
+            local rfs = nil
+            if btn.CreateFontString then
+                local ok, f = pcall(btn.CreateFontString, btn, nil, "OVERLAY", "GameFontHighlightSmall")
+                if ok and f then rfs = f end
+            end
+            if rfs then
+                if rfs.SetPoint then pcall(rfs.SetPoint, rfs, "LEFT", 0, 0) end
+                if rfs.SetSize then pcall(rfs.SetSize, rfs, math.max(cw - 6, 20), ROW_H) end
+                if rfs.SetJustifyH then pcall(rfs.SetJustifyH, rfs, c.align or "LEFT") end
+                if rfs.SetWordWrap then pcall(rfs.SetWordWrap, rfs, false) end
+                ApplyRowFont(rfs)
+                btn._fs = rfs
+            end
+            btn._rec = nil
+            btn._row = row
+            if btn.RegisterForClicks then pcall(btn.RegisterForClicks, btn, "LeftButtonUp") end
+            if btn.SetScript then
+                pcall(btn.SetScript, btn, "OnClick", function(self)
+                    local shift = false
+                    if _G.IsShiftKeyDown then
+                        local ok, v = pcall(_G.IsShiftKeyDown)
+                        if ok and v then shift = true end
+                    end
+                    if not shift and _G.IsModifiedClick then
+                        local ok, v = pcall(_G.IsModifiedClick, "CHATLINK")
+                        if ok and v then shift = true end
+                    end
+                    UI.HandleRecipeClick(self._rec, shift)
+                end)
+                pcall(btn.SetScript, btn, "OnEnter", function(self)
+                    if type(self._rec) ~= "table" then return end
+                    local r = self._row
+                    if r and r._bg then SetRowBG(r._bg, ZEBRA_HOVER) end
+                    local di = (r and r._dataIndex) or 0
+                    UI.ShowRowTooltip(self, di)
+                    GameTooltip:AddLine(L.TIP_RECIPE_OPEN_HINT, 0.6, 0.9, 0.6)
+                    if UI.IsAuctionHouseShown and UI.IsAuctionHouseShown() then
+                        GameTooltip:AddLine(L.TIP_RECIPE_AH_HINT, 1, 0.82, 0)
+                    end
+                    GameTooltip:Show()
+                    if self._fs and self._fs.SetTextColor then
+                        pcall(self._fs.SetTextColor, self._fs, 1, 0.82, 0)
+                    end
+                end)
+                pcall(btn.SetScript, btn, "OnLeave", function(self)
+                    local r = self._row
+                    local stillOver = false
+                    if r and r.IsMouseOver then
+                        local ok, v = pcall(r.IsMouseOver, r)
+                        if ok and v then stillOver = true end
+                    end
+                    if not stillOver and r and r._bg and r._dataIndex then
+                        SetRowBG(r._bg, RowBGColor(r._dataIndex))
+                    end
+                    GameTooltip:Hide()
+                    if self._fs and self._fs.SetTextColor then
+                        pcall(self._fs.SetTextColor, self._fs, 1, 1, 1)
+                    end
+                end)
+            end
+            row.cols[c.key] = btn
+        elseif c.key == "prof" then
             -- Иконка-кнопка профессии: клик открывает окно (если изучена), ховер — имя + подсказка
             local btn = CreateFrame("Button", nil, row)
             btn:SetPoint("LEFT", x + 1, 0)
@@ -680,9 +927,17 @@ local function FillRow(row, p, dataIndex)
     row:SetPoint("TOPLEFT", 0, -(dataIndex - 1) * ROW_H)
     if row._bg then SetRowBG(row._bg, RowBGColor(dataIndex)) end
     local rec, eco = p.rec, p.eco
-    -- Рецепт (иконки нет, п.2 — только текст от края колонки, как шапка)
+    -- Рецепт-ссылка (кнопка): текст от края колонки, клик — открыть, Shift+клик — АХ
     if row.cols.recipe then
-        row.cols.recipe:SetText(rec.name or ("#" .. (rec.recipeSpellID or "?")))
+        local cell = row.cols.recipe
+        local txt = rec.name or ("#" .. (rec.recipeSpellID or "?"))
+        if cell._fs and cell._fs.SetText then
+            pcall(cell._fs.SetText, cell._fs, txt)
+            if cell._fs.SetTextColor then pcall(cell._fs.SetTextColor, cell._fs, 1, 1, 1) end
+        elseif cell.SetText then
+            pcall(cell.SetText, cell, txt)
+        end
+        cell._rec = rec
     end
 
     -- Профессия: иконка-кнопка (клик — открыть, если изучена). Имя — в тултипе иконки и строки.
@@ -810,17 +1065,29 @@ local function RenderEmpty(msg)
     row:SetPoint("TOPLEFT", 0, 0)
     if row._bg then SetRowBG(row._bg, ZEBRA_ODD) end
     for _, fs in pairs(row.cols) do
-        if fs.SetText then pcall(fs.SetText, fs, "") end
+        if fs._fs and fs._fs.SetText then
+            pcall(fs._fs.SetText, fs._fs, "")
+        elseif fs.SetText then
+            pcall(fs.SetText, fs, "")
+        end
         if fs._icon then fs._icon:Hide() end
         if fs._fallback then fs._fallback:Hide() end
         fs._rec = nil
     end
     local vis = UI.GetVisibleColumns()
     local firstKey = vis[1] and vis[1].key or "recipe"
+    local function SetEmptyText(cell)
+        if not cell then return end
+        if cell._fs and cell._fs.SetText then
+            pcall(cell._fs.SetText, cell._fs, msg)
+        elseif cell.SetText then
+            pcall(cell.SetText, cell, msg)
+        end
+    end
     if row.cols[firstKey] then
-        row.cols[firstKey]:SetText(msg)
+        SetEmptyText(row.cols[firstKey])
     elseif row.cols.recipe then
-        row.cols.recipe:SetText(msg)
+        SetEmptyText(row.cols.recipe)
     end
     row:Show()
     for i = 2, #rows do rows[i]:Hide() end
