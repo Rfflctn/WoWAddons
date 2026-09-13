@@ -94,3 +94,19 @@ for _, rec in ipairs(RESOLVED_LP) do DecorLumberProfitStore.SaveRecipe(rec) end
     check('refresh restores true in memory', 'tostring(RESOLVED_LP[1].learned)', 'true')
     check('refresh persists true in db', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Tester)', 'true')
     check('alt false preserved', 'tostring(DecorLumberProfitDB.recipes[424242].learnedBy.Alt)', 'false')
+
+    # ---- legacy-строка без learnedBy (сейвы до 2.1.0): чужой false не стирает anyone-флаг ----
+    exec_(r'''
+OLD_GETINFO_LP2 = C_TradeSkillUI.GetRecipeInfo
+DecorLumberProfitDB.recipes[424244] = { recipeSpellID=424244, recipeID=1002, name="Legacy",
+    outputItemID=999002, learned=true,
+    reagents={ { itemID=256963, quantity=2 } } }
+UnitName = function() return "Alt" end
+C_TradeSkillUI.GetRecipeInfo = function(id) return { learned = false } end
+RL_LEG2 = { { recipeSpellID = 424244, learned = true } }
+DecorLumberProfitStore.RefreshLearnedFlags(RL_LEG2)
+UnitName = OLD_UNITNAME_LP
+C_TradeSkillUI.GetRecipeInfo = OLD_GETINFO_LP2
+''')
+    check('legacy anyone-flag survives alt refresh', 'tostring(DecorLumberProfitDB.recipes[424244].learned)', 'true')
+    check('legacy alt refresh records alt', 'tostring(DecorLumberProfitDB.recipes[424244].learnedBy.Alt)', 'false')

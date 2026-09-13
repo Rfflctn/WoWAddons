@@ -109,3 +109,55 @@ REALM_STATS = DecorLumberProfitPrices.GetRealmAuctionInfo(999002)
     check('current realm price remains separate', 'CURRENT_STATS.price', '200000')
     check('owned quantity sums characters', 'CURRENT_STATS.ownQty', '11')
     check('realm tooltip data has two realms', '#REALM_STATS', '2')
+
+    # Persist: пустой АХ не стирает последнюю цену (lastPrice переживает noauction).
+    exec_(r'''
+DecorLumberProfitPrices.SetPrice(700200, 50000, "commodity")
+DecorLumberProfitPrices.MarkNoAuction(700200, "commodity-empty")
+NOAUC_PRICE = DecorLumberProfitPrices.GetCachedPrice(700200)
+MAP_NOAUC, NEED_NOAUC = DecorLumberProfitPrices.CollectPricesForRecipes({
+    { recipeSpellID=9, outputItemID=700200, reagents={} },
+})
+STATS_NOAUC = DecorLumberProfitPrices.GetAuctionStats(700200)
+REALMS_NOAUC = DecorLumberProfitPrices.GetRealmAuctionInfo(700200)
+NOAUC_RP, NOAUC_RS = nil, nil
+for _, info in ipairs(REALMS_NOAUC) do
+    if info.key == "TestRealm" then NOAUC_RP = info.price; NOAUC_RS = info.stale end
+end
+''')
+    check('noauction keeps last price', 'NOAUC_PRICE', '50000')
+    check('noauction last price in map', 'MAP_NOAUC[700200]', '50000')
+    check('noauction not re-requested while fresh', '#NEED_NOAUC', '0')
+    check('noauction stats price is last', 'STATS_NOAUC.price', '50000')
+    check('noauction stats stale', 'tostring(STATS_NOAUC.stale)', 'true')
+    check('noauction realm line price is last', 'NOAUC_RP', '50000')
+    check('noauction realm line stale', 'tostring(NOAUC_RS)', 'true')
+
+    # Persist: протухшая цена видна в таблице, пока идёт фоновый рескан.
+    exec_(r'''
+DecorLumberProfitPrices.SetPrice(700201, 60000, "test")
+TTL_S2 = time
+time = function() return TTL_S2() + 3700 end
+MAP_STALE, NEED_STALE = DecorLumberProfitPrices.CollectPricesForRecipes({
+    { recipeSpellID=10, outputItemID=700201, reagents={} },
+})
+time = TTL_S2
+''')
+    check('stale price stays in map', 'MAP_STALE[700201]', '60000')
+    check('stale price re-requested', '#NEED_STALE', '1')
+
+    # Persist: SV другого реалма читается независимо от давности (стирается только сбросом).
+    exec_(r'''
+TEST_REALM = "OtherRealm"
+TEST_REALM_NAME = "Other Realm"
+DecorLumberProfitPrices.InitializeRealm()
+TTL_S3 = time
+time = function() return TTL_S3() - 8000 end
+DecorLumberProfitPrices.SetPrice(700203, 71000, "other")
+time = TTL_S3
+TEST_REALM = "TestRealm"
+TEST_REALM_NAME = "Test Realm"
+DecorLumberProfitPrices.InitializeRealm()
+OLD_OTHER_PRICE = DecorLumberProfitPrices.GetCachedPrice(700203, "OtherRealm")
+''')
+    check('other realm old price persists', 'OLD_OTHER_PRICE', '71000')

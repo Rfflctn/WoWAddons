@@ -51,6 +51,17 @@ local function HasAnyLearner(learnedBy)
     return false
 end
 
+-- "Знает хоть кто-то" с учётом legacy-сейвов (до пер-персонажного учёта 2.1.0):
+-- строка learned=true без единого true в learnedBy означает "владелец неизвестен",
+-- а не "никто не знает". Первым же false-сканом чужого персонажа такой флаг НЕ
+-- сбрасываем — иначе апгрейд с 2.0.x "забывал" персонажа-владельца, пока тот
+-- не залогинился новой версией и не записал явное learnedBy[name]=true.
+local function AnyoneKnows(learnedBy, fallbackLearned)
+    if HasAnyLearner(learnedBy) then return true end
+    if fallbackLearned == true then return true end
+    return false
+end
+
 local function CountTable(t)
     local Addon = _G.DecorLumberProfit
     if Addon and Addon.CountTable then return Addon.CountTable(t) end
@@ -298,7 +309,8 @@ function Store.SaveRecipe(rec)
         ser.learned = true
     elseif rec.learned == false then
         ser.learnedBy[player] = false
-        ser.learned = HasAnyLearner(ser.learnedBy) and true or false
+        -- existing.learned — legacy anyone-флаг без владельца: храним (см. AnyoneKnows)
+        ser.learned = AnyoneKnows(ser.learnedBy, existing and existing.learned) and true or false
     else
         if existing then
             ser.learned = existing.learned
@@ -405,7 +417,12 @@ function Store.LoadSavedRecipes()
             end
             if type(rec.learnedBy) ~= "table" then rec.learnedBy = {} end
             local u = nil
-            if rec.outputItemID then u = unsell(rec.outputItemID) end
+            if rec.outputItemID then
+                -- API предмета может кинуть (taint/secret в Midnight): ошибка = "не знаем",
+                -- паркуем в pending, а не роняем всю загрузку SavedVariables.
+                local ok, v = pcall(unsell, rec.outputItemID)
+                if ok then u = v end
+            end
             if u == true then
                 DecorLumberProfitDB.recipes[spellID] = nil -- чистим базу от непродаваемых
             elseif u == nil and rec.outputItemID then
@@ -462,7 +479,8 @@ function Store.RefreshLearnedFlags(list)
                         ser.learned = true
                     else
                         ser.learnedBy[player] = false
-                        ser.learned = HasAnyLearner(ser.learnedBy) and true or false
+                        -- ser.learned — legacy anyone-флаг без владельца: храним (см. AnyoneKnows)
+                        ser.learned = AnyoneKnows(ser.learnedBy, ser.learned) and true or false
                     end
                     rec.learnedBy = ser.learnedBy
                 else

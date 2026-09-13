@@ -33,6 +33,17 @@ PEND2 = DecorLumberProfitItemInfo.PendingCount()
 ''')
     check('pending count 2', 'PEND1', '2')
     check('pending count 1 after fail', 'PEND2', '1')
+    # FailPendingForItem сбрасывает только in-memory ожидание:
+    # сохранённая строка DB обязана пережить transient success=false
+    exec_(r'''
+DecorLumberProfitDB = DecorLumberProfitDB or {}
+DecorLumberProfitDB.recipes = DecorLumberProfitDB.recipes or {}
+DecorLumberProfitDB.recipes[424243] = { recipeSpellID=424243, outputItemID=777003 }
+DecorLumberProfitItemInfo.PendingAdd(424243, { recipeSpellID=424243, outputItemID=777003 })
+DecorLumberProfitItemInfo.FailPendingForItem(777003)
+''')
+    check('fail keeps db row', 'tostring(DecorLumberProfitDB.recipes[424243] ~= nil)', 'true')
+    check('fail drops pending entry', 'tostring(DecorLumberProfitItemInfo._pending[424243] == nil)', 'true')
     # prune: BoP-output recipe removed, sellable kept
     exec_(r'''
 C_Item.GetItemInfo = function(id)

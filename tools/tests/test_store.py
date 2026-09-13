@@ -189,3 +189,26 @@ C_TradeSkillUI.GetRecipeInfo = OLD_GETINFO
           'tostring(DecorLumberProfitUI.HasOtherLearners({ learnedBy = { Alt = false } }))', 'false')
     check('other learners sees true',
           'tostring(DecorLumberProfitUI.HasOtherLearners({ learnedBy = { Alt = false, Tester = true } }))', 'true')
+
+    # ---- legacy anyone-флаг (learned=true без learnedBy, сейвы до 2.1.0):
+    # чужой false-скан/refresh не стирает факт "кто-то знает" ----
+    exec_(r'''
+DecorLumberProfitDB.recipes[424243] = { recipeSpellID=424243, name="Legacy", learned=true, savedAt=1 }
+OLD_U_LEG = UnitName
+UnitName = function() return "Alt" end
+DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424243, name="Legacy", learned=false })
+UnitName = OLD_U_LEG
+''')
+    check('legacy learned survives alt scan', 'tostring(DecorLumberProfitDB.recipes[424243].learned)', 'true')
+    check('legacy alt false recorded', 'tostring(DecorLumberProfitDB.recipes[424243].learnedBy.Alt)', 'false')
+    exec_(r'''
+OLD_GET_LEG = C_TradeSkillUI.GetRecipeInfo
+UnitName = function() return "Alt" end
+C_TradeSkillUI.GetRecipeInfo = function(id) return { learned = false } end
+RL_LEG = { { recipeSpellID = 424243, learned = true } }
+DecorLumberProfitStore.RefreshLearnedFlags(RL_LEG)
+UnitName = OLD_U_LEG
+C_TradeSkillUI.GetRecipeInfo = OLD_GET_LEG
+''')
+    check('legacy learned survives alt refresh', 'tostring(DecorLumberProfitDB.recipes[424243].learned)', 'true')
+    check('legacy refresh alt unlearned in memory', 'tostring(RL_LEG[1].learned)', 'false')

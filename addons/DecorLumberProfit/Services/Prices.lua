@@ -118,6 +118,34 @@ local function CacheEntry(itemID, entry)
     TouchPriceUpdate()
 end
 
+-- Пустой АХ (0 лотов при полных результатах): помечаем отсутствие, НО сохраняем
+-- последнюю известную цену (lastPrice) — иначе один пустой скан навсегда стирал
+-- цену из SavedVariables ("забытая" цена). Глобальный штамп lastPriceUpdate НЕ
+-- трогаем: новых данных не пришло, время в статусе честно показывает старый скан.
+local function CacheNoAuction(itemID, source)
+    if type(itemID) ~= "number" then return end
+    if not EnsureRealm() then return end
+    local old = priceCache[itemID]
+    local entry = { noauction = true, timestamp = Now(), source = source or "unknown", qty = 0, listings = 0 }
+    if type(old) == "table" then
+        if type(old.price) == "number" then
+            entry.lastPrice, entry.lastTimestamp, entry.lastSource = old.price, old.timestamp, old.source
+        elseif type(old.lastPrice) == "number" then
+            entry.lastPrice, entry.lastTimestamp, entry.lastSource = old.lastPrice, old.lastTimestamp, old.lastSource
+        end
+    end
+    priceCache[itemID] = entry
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.priceCache = DecorLumberProfitDB.priceCache or {}
+    DecorLumberProfitDB.priceCache[activeRealmKey] = DecorLumberProfitDB.priceCache[activeRealmKey] or {}
+    DecorLumberProfitDB.priceCache[activeRealmKey][itemID] = entry
+end
+
+-- Публичная пометка "нет на АХ" (использует и ResolveItem): переживает lastPrice.
+function Auction.MarkNoAuction(itemID, source)
+    return CacheNoAuction(itemID, source)
+end
+
 -- Время последнего успешного обновления цен (timestamp time()) или nil («ещё не обновляли»).
 -- Фолбэк на SavedVariables — переживает /reload даже до первого SetPrice в сессии.
 function Auction.GetLastPriceUpdate(realmKey)
@@ -148,6 +176,8 @@ function Auction.FormatMoney(copper)
 end
 
 -- ==== Кэш цен ====
+-- Возвращает последнюю известную цену: живую (entry.price) или сохранённую
+-- при пустом АХ (entry.lastPrice, см. CacheNoAuction). nil — данных нет вообще.
 function Auction.GetCachedPrice(itemID, realmKey)
     if type(itemID) ~= "number" then return nil end
     local entry
@@ -159,17 +189,18 @@ function Auction.GetCachedPrice(itemID, realmKey)
         entry = priceCache[itemID]
     end
     if not entry then
-        -- Пробуем SavedVariables (переживает /reload; TTL x2 — компромисс между свежестью и запросами)
+        -- SavedVariables переживают /reload и релогины: отдаём последнюю известную
+        -- цену независимо от давности (свежесть гейтит только HasFreshPrice/need;
+        -- стирается цена — только ручным сбросом кэша или переустановкой).
         local bucket = RealmBucket(realmKey)
         local saved = bucket and bucket[itemID]
         if saved then
-            if IsExpired(saved, GetTTL() * 2) then return nil end
             if not realmKey or realmKey == activeRealmKey then priceCache[itemID] = saved end
-            return saved.price, saved
+            return saved.price or saved.lastPrice, saved
         end
         return nil
     end
-    return entry.price, entry
+    return entry.price or entry.lastPrice, entry
 end
 
 function Auction.SetPrice(itemID, price, source, qty, listings)
@@ -189,10 +220,11 @@ function Auction.GetCachedQuantity(itemID)
     EnsureRealm()
     local entry = priceCache[itemID]
     if not entry then
+        -- SavedVariables переживают /reload: количество тоже не теряем по TTL
+        -- (свежесть гейтит только HasFreshPrice; стирается — только сбросом).
         local bucket = RealmBucket()
         local saved = bucket and bucket[itemID]
         if saved then
-            if IsExpired(saved, GetTTL() * 2) then return nil end
             priceCache[itemID] = saved
             entry = saved
         end
@@ -265,7 +297,7 @@ function Auction.GetRealmAuctionInfo(itemID)
         local qty, listings, ownKnown, ownUpdatedAt = OwnedStats(itemID, realmKey)
         if not entry and not ownKnown then return end
         local meta = db.realmMeta and db.realmMeta[realmKey]
-        local price = entry and entry.price or nil
+        local price = entry and (entry.price or entry.lastPrice) or nil
         realms[#realms + 1] = {
             key = realmKey,
             name = (type(meta) == "table" and meta.name) or realmKey,
@@ -276,7 +308,7 @@ function Auction.GetRealmAuctionInfo(itemID)
             ownListings = listings,
             ownUpdatedAt = ownUpdatedAt,
             timestamp = entry and entry.timestamp or nil,
-            stale = entry and IsExpired(entry, GetTTL()) or false,
+            stale = entry and (entry.noauction == true or IsExpired(entry, GetTTL())) or false,
         }
     end
     for realmKey, bucket in pairs(db.priceCache or {}) do
@@ -296,7 +328,8 @@ function Auction.GetAuctionStats(itemID, realmKey)
     local ownQty, ownListings, ownKnown, ownUpdatedAt = OwnedStats(itemID, realmKey)
     if not entry and not ownKnown then return nil end
     return {
-        price = entry and entry.price or nil,
+        -- при пустом АХ показываем последнюю известную цену как stale (см. CacheNoAuction)
+        price = entry and (entry.price or entry.lastPrice) or nil,
         qty = qty,
         listings = listings,
         ownQty = ownQty,
@@ -304,7 +337,7 @@ function Auction.GetAuctionStats(itemID, realmKey)
         ownKnown = ownKnown,
         ownUpdatedAt = ownUpdatedAt,
         timestamp = entry and entry.timestamp or nil,
-        stale = entry and IsExpired(entry, GetTTL()) or false,
+        stale = entry and (entry.noauction == true or IsExpired(entry, GetTTL())) or false,
     }
 end
 
@@ -597,7 +630,7 @@ local function ResolveItem(itemID)
     if C_AuctionHouse and C_AuctionHouse.HasFullCommoditySearchResults then
         local ok, full = pcall(C_AuctionHouse.HasFullCommoditySearchResults, itemID)
         if ok and full then
-            CacheEntry(itemID, { noauction = true, timestamp = Now(), source = "commodity-empty", qty = 0, listings = 0 })
+            CacheNoAuction(itemID, "commodity-empty")
             attempts[itemID] = nil
             if wasPending then stats.resolved = stats.resolved + 1 end
             return
@@ -608,7 +641,7 @@ local function ResolveItem(itemID)
         if okKey and itemKey then
             local ok, full = pcall(C_AuctionHouse.HasFullItemSearchResults, itemKey)
             if ok and full then
-                CacheEntry(itemID, { noauction = true, timestamp = Now(), source = "item-empty", qty = 0, listings = 0 })
+                CacheNoAuction(itemID, "item-empty")
                 attempts[itemID] = nil
                 if wasPending then stats.resolved = stats.resolved + 1 end
                 return
@@ -878,8 +911,13 @@ function Auction.CollectPricesForRecipes(recipes)
         if Auction.HasFreshPrice(id) then
             local p = Auction.GetCachedPrice(id)
             if p then map[id] = p end
-            -- свежий noauction: ни в map, ни в need (цены нет и не будет до протухания)
+            -- свежий чистый noauction (без lastPrice): ни в map, ни в need
+            -- (цены нет и не будет до протухания)
         else
+            -- Протухшая цена: показываем последнюю известную, пока идёт фоновый
+            -- рескан — иначе цена "забывается" каждый TTL. В need — всё равно.
+            local p = Auction.GetCachedPrice(id)
+            if p then map[id] = p end
             table.insert(need, id)
         end
     end

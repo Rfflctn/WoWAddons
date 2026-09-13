@@ -108,14 +108,14 @@ function ItemInfo.PendingCount()
     return c
 end
 
--- Сервер сообщил, что данных о предмете нет (success=false) — сбрасываем ждущие по нему рецепты
+-- Сервер сообщил, что данных о предмете нет (success=false) — сбрасываем только
+-- in-memory ожидание. Сохранённую строку DB НЕ трогаем: transient-ошибка сервера
+-- не должна стирать накопленный рецепт (включая learnedBy) — иначе данные
+-- "забываются" сами, без ручного сброса. Повтор решит следующий скан/загрузка.
 function ItemInfo.FailPendingForItem(itemID)
     for spellID, rec in pairs(ItemInfo._pending) do
         if rec.outputItemID == itemID then
             ItemInfo._pending[spellID] = nil
-            if DecorLumberProfitDB and DecorLumberProfitDB.recipes then
-                DecorLumberProfitDB.recipes[spellID] = nil
-            end
         end
     end
 end
