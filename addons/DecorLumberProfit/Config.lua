@@ -12,16 +12,24 @@ DecorLumberProfitConfig.SCAN = {
 
 -- Настройки аукциона
 DecorLumberProfitConfig.AUCTION = {
-    QUERY_DELAY = 0.65, -- ~92 запроса/мин; лимит Blizzard 100/мин = 0.6с между запросами
+    QUERY_DELAY = 0.62, -- ~96 запросов/мин; лимит Blizzard 100/мин = 0.6с между запросами
     PRICE_TTL = 3600, -- свежесть цены 1 ч: гейтит только рескан; последняя известная
     -- цена (включая lastPrice при пустом АХ) хранится в SV до ручного сброса
     MAX_QUEUE = 500,   -- размер активной очереди; излишек копится в overflow и подгружается сам
+    -- Быстрый предварительный browse-скан по категориям: пока идёт точный точечный
+    -- скан, таблица сразу получает приблизительную минимальную цену (пометка "~").
+    -- Значения только в памяти и не считаются свежим кэшем.
+    PREVIEW_ENABLED = true,
+    PREVIEW_CLASSES = { 5, 7, 20 }, -- Enum.ItemClass: Reagent, Tradegoods, Housing
 }
 
--- Мультиреалм: показывать ли в тултипе данные со всех известных реалмов.
+-- Мультиреалм-гейт: весь кросс-реалмовый ПОКАЗ (блок «данные по серверам»
+-- в тултипе, fallback "*" в колонках «На АХ»/«Мои», любые цены/количества
+-- с чужих реалмов) — только при /dlp multirealm on.
 -- По умолчанию выключен (версия для масс — один мир); включается командой
 -- /dlp multirealm on (персист в DB.settings.multiRealm, переживает /reload).
--- Сбор данных при этом не останавливается — гейтится только отображение.
+-- Сбор и хранение realm-scoped данных при этом не останавливаются — гейтится
+-- только отображение, поэтому включение сразу показывает накопленную историю.
 DecorLumberProfitConfig.MULTI_REALM = false
 
 -- Настройки UI
@@ -47,7 +55,8 @@ DecorLumberProfitConfig.API_CHECKLIST = {
     auction = {
         "C_AuctionHouse.MakeItemKey(itemID, itemLevel, itemSuffix, battlePetSpeciesID) -> ItemKey",
         "C_AuctionHouse.SendSearchQuery(itemKey, sorts, separateOwnerItems [,minLevel, maxLevel]) -- 100/мин throttle",
-        "C_AuctionHouse.SendBrowseQuery(query)",
+        "C_AuctionHouse.SendBrowseQuery(query) -- query.itemClassFilters = {{classID = Enum.ItemClass.Reagent/Tradegoods/Housing}}",
+        "Enum.AuctionHouseSortOrder.Price / AuctionHouseSortType{sortOrder, reverseSort}",
         "C_AuctionHouse.GetItemSearchResultsQuantity(itemKey) / GetItemSearchResultInfo",
         "C_AuctionHouse.GetCommoditySearchResultsQuantity(itemID) / GetCommoditySearchResultInfo",
         "C_AuctionHouse.GetMaxItemSearchResultBuyout / GetMaxCommoditySearchResultPrice",

@@ -58,6 +58,20 @@ TV_MR_OFF = DecorLumberProfitUI.IsMultiRealmEnabled()
     check('multirealm set on', 'tostring(TV_MR_ON)', 'true')
     check('multirealm persisted', 'tostring(TV_MR_SAVED)', 'true')
     check('multirealm set off', 'tostring(TV_MR_OFF)', 'false')
+    # fallback "*" — чистая функция; сам ПОКАЗ чужого реалма гейтится флагом:
+    # FillRow (колонки «На АХ»/«Мои»), AttachAuctionQuantity (eco.ahRealms)
+    # и AddRealmAuctionLines (тултип-блок) читают чужие реалмы только при on
+    exec_(r'''
+TV_FB_QTY = DecorLumberProfitUI.FallbackRealmQuantity({ { qty = 7 } }, "qty")
+TV_FB_OWN = DecorLumberProfitUI.FallbackRealmQuantity({ { ownQty = 3 } }, "ownQty")
+TV_FB_EMPTY = DecorLumberProfitUI.FallbackRealmQuantity({}, "qty")
+DecorLumberProfitUI.SetMultiRealm(false)
+TV_MR_GATE = DecorLumberProfitUI.IsMultiRealmEnabled()
+''')
+    check('fallback qty other realm marks *', 'TV_FB_QTY', '7*')
+    check('fallback own other realm marks *', 'TV_FB_OWN', '3*')
+    check('fallback empty no data', 'tostring(TV_FB_EMPTY)', 'nil')
+    check('multirealm gate stays off', 'tostring(TV_MR_GATE)', 'false')
     # высота строк: дефолт 20 (иконка 18), set 16..32 с персистом, мимо — reject
     exec_(r'''
 DecorLumberProfitDB = DecorLumberProfitDB or { settings = {} }

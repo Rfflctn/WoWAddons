@@ -213,7 +213,10 @@ function Store.Upgrade()
     if saved.bruteforce ~= nil then sc.ENABLE_BRUTEFORCE = saved.bruteforce end
     if type(saved.maxscan) == "number" then sc.MAX_RESULTS = saved.maxscan end
     DecorLumberProfitConfig.SCAN = sc
-    -- Мультиреалм-отображение (переживает /reload; сбор данных не гейтится)
+    -- Мультиреалм-гейт (дефолт off, версия для масс — один мир): гейтится ВЕСЬ
+    -- кросс-реалмовый показ (тултип-блок, fallback "*" в «На АХ»/«Мои»,
+    -- чужие цены/количества — см. UI/Tooltip.lua, UI/TableView.lua).
+    -- Сбор и хранение realm-scoped данных не гейтятся и идут всегда.
     if DecorLumberProfitDB.settings.multiRealm ~= nil then
         DecorLumberProfitConfig.MULTI_REALM = DecorLumberProfitDB.settings.multiRealm and true or false
     elseif DecorLumberProfitConfig.MULTI_REALM == nil then

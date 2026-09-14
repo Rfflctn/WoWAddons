@@ -621,11 +621,13 @@ function UI.FormatAuctionQuantity(qty, listings)
     return tostring(qty)
 end
 
--- Fallback для колонок «На АХ»/«Мои» с другого сервера (п.4): текущее значение
+-- Fallback для колонок «На АХ»/«Мои» с другого сервера: текущее значение
 -- приоритетно, но если на текущем сервере данных нет — показываем первое известное
 -- с другого сервера + "*" (расшифровка по серверам — в тултипе строки).
 -- realms — список из Prices.GetRealmAuctionInfo, field — "qty" или "ownQty".
 -- Чистая функция (тесты). Возвращает строку или nil.
+-- NB: вызывать только под мультиреалм-гейтом (UI.IsMultiRealmEnabled()): без флага
+-- массовая версия показывает dash вместо чужого реалма (см. FillRow ниже).
 function UI.FallbackRealmQuantity(realms, field)
     if type(realms) ~= "table" or (field ~= "qty" and field ~= "ownQty") then return nil end
     for _, info in ipairs(realms) do
@@ -984,11 +986,13 @@ local function FillRow(row, p, dataIndex)
     -- Цена продажи
     if row.cols.sellPrice then
         if eco.outputUnitPrice then
+            -- "~" — предварительная цена из быстрого browse-скана (точный ещё идёт)
+            local mark = eco.outputApprox and "~" or ""
             -- Показываем цену за штуку и суммарную
             if rec.outputQty > 1 then
-                row.cols.sellPrice:SetText(UI.GetMoneyStr(eco.outputUnitPrice) .. " / " .. UI.GetMoneyStr(eco.outputTotalPrice))
+                row.cols.sellPrice:SetText(mark .. UI.GetMoneyStr(eco.outputUnitPrice) .. " / " .. UI.GetMoneyStr(eco.outputTotalPrice))
             else
-                row.cols.sellPrice:SetText(UI.GetMoneyStr(eco.outputUnitPrice))
+                row.cols.sellPrice:SetText(mark .. UI.GetMoneyStr(eco.outputUnitPrice))
             end
         else
             row.cols.sellPrice:SetText(L.CELL_NO_AH)
@@ -996,15 +1000,19 @@ local function FillRow(row, p, dataIndex)
     end
 
     -- Конкуренция: сколько штук output выложено на АХ.
-    -- nil (не сканировали текущий сервер) — fallback с другого сервера + "*"
-    -- (п.4, хранение realm-scoped как у цены); совсем нет данных — dash.
+    -- nil (не сканировали текущий сервер) — при /dlp multirealm on fallback
+    -- с другого сервера + "*" (realm-scoped хранение как у цены, п.4);
+    -- при выключенном флаге (дефолт для масс) — dash, чужой реалм не подмешиваем.
     -- 0 (пустой АХ, noauction) — "0".
     if row.cols.ahQty then
         local txt = UI.FormatAuctionQuantity(eco.ahQty, eco.ahListings)
         if txt then
             row.cols.ahQty:SetText(txt)
         else
-            local fb = UI.FallbackRealmQuantity and UI.FallbackRealmQuantity(eco.ahRealms, "qty") or nil
+            local fb = nil
+            if UI.IsMultiRealmEnabled and UI.IsMultiRealmEnabled() then
+                fb = UI.FallbackRealmQuantity and UI.FallbackRealmQuantity(eco.ahRealms, "qty") or nil
+            end
             if fb then
                 row.cols.ahQty:SetText(fb)
             else
@@ -1014,13 +1022,18 @@ local function FillRow(row, p, dataIndex)
     end
 
     -- Наши предметы: сначала текущий сервер (сумма снимков всех персонажей
-    -- аккаунта на нём). Если снимков текущего сервера нет — значение с другого
-    -- сервера + "*" (п.4); dash означает, что ни один снимок ещё не получен нигде.
+    -- аккаунта на нём). При /dlp multirealm on и отсутствии снимков текущего
+    -- сервера — значение с другого сервера + "*" (п.4); при выключенном флаге —
+    -- dash. Dash означает, что ни один снимок текущего сервера ещё не получен
+    -- (при включённом флаге — нигде).
     if row.cols.ahMineQty then
         if eco.ahMineQty ~= nil then
             row.cols.ahMineQty:SetText(tostring(eco.ahMineQty))
         else
-            local fb = UI.FallbackRealmQuantity and UI.FallbackRealmQuantity(eco.ahRealms, "ownQty") or nil
+            local fb = nil
+            if UI.IsMultiRealmEnabled and UI.IsMultiRealmEnabled() then
+                fb = UI.FallbackRealmQuantity and UI.FallbackRealmQuantity(eco.ahRealms, "ownQty") or nil
+            end
             if fb then
                 row.cols.ahMineQty:SetText(fb)
             else
@@ -1123,6 +1136,8 @@ end
 -- Добивка eco конкуренцией с АХ (не меняет формулу Economy: только отображение/сортировка).
 -- ahQty/ahMineQty — текущий сервер (как цена); ahRealms — сводка по ВСЕМ известным
 -- серверам (realm-scoped хранение как у цены, п.4) для fallback "*" и тултипа.
+-- Мультиреалм-гейт: без /dlp multirealm on сводку не цепляем вообще — массовая
+-- версия (дефолт off) не видит чужие реалмы даже если данные накоплены.
 local function AttachAuctionQuantity(rec, eco)
     if not eco or not rec or not rec.outputItemID then return eco end
     local P = _G.DecorLumberProfitPrices
@@ -1142,10 +1157,19 @@ local function AttachAuctionQuantity(rec, eco)
         end
     end
     if P and P.GetRealmAuctionInfo then
-        local okR, realms = pcall(P.GetRealmAuctionInfo, rec.outputItemID)
-        if okR and type(realms) == "table" and #realms > 0 then
-            eco.ahRealms = realms
+        local showRealms = UI.IsMultiRealmEnabled and UI.IsMultiRealmEnabled()
+        if showRealms then
+            local okR, realms = pcall(P.GetRealmAuctionInfo, rec.outputItemID)
+            if okR and type(realms) == "table" and #realms > 0 then
+                eco.ahRealms = realms
+            end
         end
+    end
+    -- Предварительная (browse) цена: точный скан ещё идёт — помечаем "~" в UI.
+    -- Как только приходит точная цена, preview очищается и метка снимается.
+    if P and P.GetPreviewPrice then
+        local okPv, pv = pcall(P.GetPreviewPrice, rec.outputItemID)
+        if okPv and pv then eco.outputApprox = true end
     end
     return eco
 end

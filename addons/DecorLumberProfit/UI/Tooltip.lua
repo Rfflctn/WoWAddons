@@ -75,10 +75,12 @@ function UI.IsLearnedAnywhere(rec)
     return rec.learned == true or UI.HasOtherLearners(rec)
 end
 
--- Мультиреалм-отображение: выключено по умолчанию (один мир для масс),
--- включается командой /dlp multirealm on. Гейтит только тултип-блок
--- «данные по серверам»; сбор и хранение данных по реалмам идут всегда,
--- поэтому включение сразу показывает накопленную историю.
+-- Мультиреалм-показ: выключен по умолчанию (один мир для масс),
+-- включается командой /dlp multirealm on. Гейтит ВЕСЬ кросс-реалмовый показ:
+-- блок «данные по серверам» в тултипе, fallback "*" в колонках «На АХ»/«Мои»
+-- (см. UI/TableView.lua) и любые цены/количества с чужих реалмов.
+-- Сбор и хранение realm-scoped данных при этом идут всегда (см. Services/Prices.lua,
+-- Services/Store.lua), поэтому включение сразу показывает накопленную историю.
 function UI.IsMultiRealmEnabled()
     local cfg = _G.DecorLumberProfitConfig
     return cfg and cfg.MULTI_REALM == true or false
@@ -98,10 +100,11 @@ local function AddRealmAuctionLines(itemID)
     if not (P and P.GetRealmAuctionInfo) then return end
     local ok, realms = pcall(P.GetRealmAuctionInfo, itemID)
     if not ok or type(realms) ~= "table" or #realms == 0 then return end
-    -- Сравнение серверов (п.4): при данных с 2+ серверов блок показываем всегда,
-    -- даже если /dlp multirealm off (массовый дефолт — один мир без лишних строк).
-    -- При одном сервере — только если multirealm явно включён.
-    if #realms < 2 and not UI.IsMultiRealmEnabled() then return end
+    -- Кросс-реалмовый показ — только при /dlp multirealm on (дефолт off, версия
+    -- для масс — один мир). Без флага блок не показываем вообще, даже при
+    -- данных с 2+ серверов: чужой реалм нельзя пересканировать отсюда, а молча
+    -- подмешивать его в массовую версию запрещено правилом мультиреалм-гейта.
+    if not UI.IsMultiRealmEnabled() then return end
     GameTooltip:AddLine(L.TIP_AH_REALMS_TITLE, 0.8, 0.8, 0.8)
     GameTooltip:AddLine(L.TIP_AH_REALMS_NOTE, 0.6, 0.6, 0.6, true)
     for _, info in ipairs(realms) do

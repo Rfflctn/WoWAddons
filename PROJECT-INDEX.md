@@ -37,7 +37,7 @@ wiki-lua/                  # архив доков (~8 тыс. файлов) —
 - `addons/DecorLumberProfit/UI.lua` — неймспейс + общее состояние таблицы (`UI._x`, `UI.displayList`-алиас).
 - `addons/DecorLumberProfit/UI/TableView.lua` — колонки (`UI.COLUMNS`, `LayoutColumns/ColWidth`), сортировка (`OnHeaderClick`), пул строк с виртуализацией (`VisibleRange`, `RenderVisibleRows`, фолбэк «всё» без высоты), `RefreshTable` (прогресс `ST_QUEUE_PROGRESS` из `Prices.GetQueueInfo`), иконки, `SetHideUnlearned`.
 - `addons/DecorLumberProfit/UI/MainFrame.lua` — окно: ресайз 700–1400 (`OnMainFrameSizeChanged`, троттлинг 20px, снос пула), health-dot (`UI._healthDot`), шапка (`LayoutHeaderCells`, фикс захвата loop-var), скролл + `OnVerticalScroll`-хук.
-- `addons/DecorLumberProfit/UI/Actions.lua` — скан/DB/цены/очистка; `UI/Commands.lua` — slash + события; `UI/Status.lua` — `SetStatus` (+цвет точки); `UI/Tooltip.lua` — тултипы (item-ссылки `SetItemByID` с фолбэком); `UI/Popups.lua` — StaticPopup.
+- `addons/DecorLumberProfit/UI/Actions.lua` — скан/DB/цены/очистка; `UI/Commands.lua` — slash + события; `UI/Status.lua` — `SetStatus` (+цвет точки); `UI/Tooltip.lua` — тултипы (item-ссылки `SetItemByID` с фолбэком; мультиреалм-блок — только при флаге, см. `AGENTS.md` п.12); `UI/Popups.lua` — StaticPopup.
 - `addons/DecorLumberProfit/Services/Diag.lua` — диагностика: `Diag.Log` (уровни ERROR/WARN/INFO/VERBOSE), `lastError`, `SubsystemStatus`, `/dlp debug status|selftest|verbose on|off`, `/dlp bug` (бандл для issue).
 - `addons/DecorLumberProfit/Locales.lua` — тексты `enUS`/`ruRU` (`L[]`/`TL()`).
 - `addons/DecorLumberProfit/README.md` — ТЗ, формулы, установка; `CHANGELOG.md` — только версионные блоки `## [X.Y.Z] - YYYY-MM-DD`, одна кодовая сессия = один блок (детали — `AGENTS.md` п.7–8).

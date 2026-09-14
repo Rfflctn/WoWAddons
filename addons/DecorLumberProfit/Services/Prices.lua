@@ -27,6 +27,10 @@ local NotifyPriceUpdate
 local MAX_ATTEMPTS = 3
 local RESOLVE_DELAY = 1.5
 
+local itemRole = {}     -- [itemID] = "output" | "reagent": режим агрегации цены
+local previewCache = {} -- [itemID] = { price, t }: быстрый browse-скан (только память)
+local previewTargets = {}
+
 local FRAME = nil
 
 local function Now() return time() end
@@ -125,6 +129,7 @@ end
 local function CacheNoAuction(itemID, source)
     if type(itemID) ~= "number" then return end
     if not EnsureRealm() then return end
+    previewCache[itemID] = nil
     local old = priceCache[itemID]
     local entry = { noauction = true, timestamp = Now(), source = source or "unknown", qty = 0, listings = 0 }
     if type(old) == "table" then
@@ -206,10 +211,32 @@ end
 function Auction.SetPrice(itemID, price, source, qty, listings)
     if type(itemID) ~= "number" or type(price) ~= "number" then return end
     if not EnsureRealm() then return end
+    previewCache[itemID] = nil
     local old = priceCache[itemID]
     if qty == nil and old then qty = old.qty end
     if listings == nil and old then listings = old.listings end
     CacheEntry(itemID, { price = price, timestamp = Now(), source = source or "unknown", qty = qty, listings = listings })
+end
+
+-- Запись точного результата скана с двумя метриками:
+--   priceMin — самая дешёвая единица (для крафтовых предметов);
+--   priceAvg — средняя цена 10 самых дешёвых единиц, взвешенная по количеству
+--              в лоте (для реагентов: "10 дешёвых предметов", а не 10 строк).
+-- entry.price (что читает экономика/таблица) выбирается по роли предмета.
+function Auction.SetSamplePrice(itemID, priceMin, priceAvg, source, qty, listings)
+    if type(itemID) ~= "number" then return end
+    if not EnsureRealm() then return end
+    local role = itemRole[itemID]
+    local primary = (role == "reagent") and (priceAvg or priceMin) or priceMin
+    if primary == nil then return end
+    previewCache[itemID] = nil
+    local old = priceCache[itemID]
+    if qty == nil and old then qty = old.qty end
+    if listings == nil and old then listings = old.listings end
+    CacheEntry(itemID, {
+        price = primary, priceMin = priceMin, priceAvg = priceAvg,
+        timestamp = Now(), source = source or "unknown", qty = qty, listings = listings,
+    })
 end
 
 -- Кол-во лотов/штук на аукционе (конкуренция). Делит TTL с ценой: пишется тем же
@@ -416,6 +443,8 @@ function Auction.ClearPriceCache(realmKey)
     -- Память смотрит на тот же (пустой) бакет, что и SV: иначе priceCache и
     -- DB.priceCache[realm] — разные таблицы, и записи расползаются.
     priceCache = RealmBucket(realmKey) or {}
+    previewCache = {}
+    previewTargets = {}
 end
 
 function Auction.IsPending(itemID) return pending[itemID] end
@@ -486,28 +515,52 @@ local function GetBrowseIndex()
     end
     return browseIndex
 end
--- Минимальная цена по первым N результатам (ограничиваем 15 для производительности).
+-- Сканирует первые N результатов (ограничиваем 15 для производительности) и считает:
+--   priceMin — цена самой дешёвой единицы;
+--   priceAvg — средняя цена 10 самых дешёвых ЕДИНИЦ (реагенты), взвешенная по
+--              количеству в лоте: лот на 7 шт по 100 и 7 шт по 120 даёт
+--              (7*100 + 3*120) / 10 = 106;
+--   rowQty   — построчная сумма info.quantity (фолбэк для totals-API, см. 2.2.2).
+-- getInfo(i) -> info; extractPrice(info) -> цена ЗА ЕДИНИЦУ; extractQty(info) -> кол-во единиц.
 -- Все вызовы API за pcall: в Midnight методы могут кидать (taint/secret) — скан не должен рваться.
--- Вторым возвратом — построчная сумма info.quantity: фолбэк количества, когда
--- totals-API (Get*SearchResultsQuantity) не отдал qty, а строки читаются.
--- Сумма точна, только если просканированы ВСЕ строки (num <= 15) — иначе её
--- использовать нельзя (неполная сумма хуже отсутствия); вызывающий решает.
-local function GetMinPrice(count, getInfo, extractPrice)
-    local minPrice, rowQty = nil, 0
+local PRICE_AVG_UNITS = 10
+local function GetSamplePrices(count, getInfo, extractPrice, extractQty)
     local limit = math.min(count or 0, 15)
+    local rows, rowQty = {}, 0
     for i = 1, limit do
         local ok, info = pcall(getInfo, i)
         if ok and info then
             local ok2, p = pcall(extractPrice, info)
             if ok2 then
                 p = p and tonumber(p)
-                if p and (not minPrice or p < minPrice) then minPrice = p end
+                if p and p > 0 then
+                    local q = 1
+                    if extractQty then
+                        local ok3, v = pcall(extractQty, info)
+                        if ok3 then q = tonumber(v) or 1 end
+                    end
+                    if q < 1 then q = 1 end
+                    rows[#rows + 1] = { price = p, qty = q }
+                end
             end
-            local q = (type(info) == "table" and tonumber(info.quantity)) or nil
-            if q then rowQty = rowQty + q end
+            local qAll = (type(info) == "table" and tonumber(info.quantity)) or nil
+            if qAll then rowQty = rowQty + qAll end
         end
     end
-    return minPrice, rowQty
+    if #rows == 0 then return nil, nil, rowQty end
+    -- Сортируем сами: даже если сервер не отсортировал или сортировка недоступна,
+    -- среднее берётся по самым дешёвым единицам.
+    table.sort(rows, function(a, b) return a.price < b.price end)
+    local minPrice, sum, units = nil, 0, 0
+    for _, r in ipairs(rows) do
+        if not minPrice then minPrice = r.price end
+        if units >= PRICE_AVG_UNITS then break end
+        local take = math.min(r.qty, PRICE_AVG_UNITS - units)
+        sum = sum + r.price * take
+        units = units + take
+    end
+    local avgPrice = (units > 0) and (sum / units) or nil
+    return minPrice, avgPrice, rowQty
 end
 
 -- Построчный фолбэк qty: цена и количество должны происходить из одного чтения,
@@ -526,12 +579,13 @@ local function UpdatePriceFromCommodity(itemID)
     -- Только Safe-версии (внутри pcall): прямые вызовы без гардов рвали весь скан при ошибке API.
     local qty, num = SafeCommodityQuantity(itemID)
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
-    local minPrice, rowQty = GetMinPrice(num, function(i)
+    local minPrice, avgPrice, rowQty = GetSamplePrices(num, function(i)
         if not C_AuctionHouse.GetCommoditySearchResultInfo then return nil end
         return C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
-    end, function(info) return info.unitPrice end)
+    end, function(info) return info.unitPrice end,
+       function(info) return info.quantity end)
     if minPrice then
-        Auction.SetPrice(itemID, minPrice, "commodity", FallbackRowQty(qty, num, rowQty), num)
+        Auction.SetSamplePrice(itemID, minPrice, avgPrice, "commodity", FallbackRowQty(qty, num, rowQty), num)
         return minPrice
     end
     return nil
@@ -541,7 +595,11 @@ local function UpdatePriceFromItem(itemKey, itemID)
     if not C_AuctionHouse then return nil end
     local qty, num = SafeItemQuantity(itemKey)
     if (not qty or qty == 0) and (not num or num == 0) then return nil end
-    local minPrice, rowQty = GetMinPrice(num, function(i)
+    -- Обычные (не commodity) предметы: buyoutAmount/minBid — цена ЛОТА (так её
+    -- трактует и тест, и 2.2.2). Среднее по 10 единицам считаем только для
+    -- commodity-реагентов (unitPrice уже за единицу), поэтому avg не передаём:
+    -- крафтовый предмет показывает минимум, а non-commodity реагент — тоже минимум.
+    local minPrice, _, rowQty = GetSamplePrices(num, function(i)
         if not C_AuctionHouse.GetItemSearchResultInfo then return nil end
         return C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
     end, function(info) return info.buyoutAmount or info.minBid end)
@@ -555,7 +613,7 @@ local function UpdatePriceFromItem(itemKey, itemID)
     if minPrice then
         if qty == nil then qty = FallbackRowQty(qty, num, rowQty) end
         if qty == nil then qty = browseQty end
-        Auction.SetPrice(itemID, minPrice, "item", qty, num)
+        Auction.SetSamplePrice(itemID, minPrice, nil, "item", qty, num)
         return minPrice
     end
     return nil
@@ -757,7 +815,12 @@ function Auction.ProcessQueue()
         if C_AuctionHouse and C_AuctionHouse.MakeItemKey and C_AuctionHouse.SendSearchQuery then
             local okKey, itemKey = pcall(C_AuctionHouse.MakeItemKey, itemID, 0, 0, 0)
             if okKey and itemKey then
-                local okSend = pcall(C_AuctionHouse.SendSearchQuery, itemKey, {}, false)
+                -- Сортировка по цене (возрастание): читаем дешёвые лоты первыми,
+                -- среднее по 10 единицам считается по самым дешёвым.
+                local E = _G.Enum
+                local order = E and E.AuctionHouseSortOrder and E.AuctionHouseSortOrder.Price
+                local sorts = order and { { sortOrder = order, reverseSort = false } } or {}
+                local okSend = pcall(C_AuctionHouse.SendSearchQuery, itemKey, sorts, false)
                 if okSend then sent = true end
             end
         end
@@ -842,8 +905,62 @@ local function QueuePendingBrowsePass()
     end)
 end
 
+-- ==== Быстрый предварительный browse-скан (по категориям) ====
+-- Пока идёт точный точечный скан (100 запросов/мин), таблица получает
+-- приблизительную минимальную цену сразу: SendBrowseQuery по категориям
+-- (Reagent/Tradegoods/Housing) даёт minPrice без лимита SendSearchQuery.
+-- Значения живут только в памяти (previewCache) и НЕ считаются свежим кэшем:
+-- HasFreshPrice их не видит, поэтому точный запрос по предмету всё равно уходит.
+-- Клиент удаляет запись, как только пришла точная цена (SetSamplePrice/
+-- SetPrice/CacheNoAuction обнуляют preview).
+local PREVIEW_TTL = 120
+function Auction.GetPreviewPrice(itemID)
+    local e = previewCache[itemID]
+    if not e then return nil end
+    if (GetTime() - (e.t or 0)) > PREVIEW_TTL then previewCache[itemID] = nil; return nil end
+    return e.price
+end
+
+local function IngestPreview(rows)
+    if type(rows) ~= "table" or not next(previewTargets) then return end
+    local now, added = GetTime(), 0
+    for _, row in ipairs(rows) do
+        if type(row) == "table" and row.itemKey and type(row.itemKey.itemID) == "number" then
+            local id = row.itemKey.itemID
+            if previewTargets[id] and not Auction.HasFreshPrice(id) then
+                local p = tonumber(row.minPrice)
+                if p and p > 0 and (not previewCache[id] or p < previewCache[id].price) then
+                    previewCache[id] = { price = p, t = now }
+                    added = added + 1
+                end
+            end
+        end
+    end
+    if added > 0 and NotifyPriceUpdate then NotifyPriceUpdate() end
+end
+
+function Auction.StartPreview(itemIDs)
+    local cfg = DecorLumberProfitConfig and DecorLumberProfitConfig.AUCTION
+    if not cfg or cfg.PREVIEW_ENABLED == false then return end
+    if not (C_AuctionHouse and C_AuctionHouse.SendBrowseQuery) then return end
+    previewTargets = {}
+    local any = false
+    for _, id in ipairs(itemIDs or {}) do
+        if type(id) == "number" then previewTargets[id] = true; any = true end
+    end
+    if not any then return end
+    local E = _G.Enum
+    local order = E and E.AuctionHouseSortOrder and E.AuctionHouseSortOrder.Price
+    local sorts = order and { { sortOrder = order, reverseSort = false } } or {}
+    for _, classID in ipairs(cfg.PREVIEW_CLASSES or { 5, 7, 20 }) do
+        local query = { searchString = "", sorts = sorts, itemClassFilters = { { classID = classID } } }
+        pcall(C_AuctionHouse.SendBrowseQuery, query)
+    end
+end
+
 -- ==== Обработчики событий аукциона ====
 local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_ADDED")
 eventFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
 eventFrame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
 eventFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_RECEIVED")
@@ -884,9 +1001,19 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             end
             NotifyPriceUpdate()
         end
-    elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "EXTRA_BROWSE_INFO_RECEIVED" then
-        -- Результаты browse изменились: индекс протух; pending-проход — коалеснутый
+    elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
+        -- Пачка browse-результатов: сразу подтягиваем предварительные цены.
+        IngestPreview(arg1)
         InvalidateBrowseIndex()
+        QueuePendingBrowsePass()
+    elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "EXTRA_BROWSE_INFO_RECEIVED" then
+        -- Результаты browse изменились: индекс протух; pending-проход — коалеснутый.
+        -- Если preview-скан ещё активен, добираем минимумы из текущего набора.
+        InvalidateBrowseIndex()
+        if next(previewTargets) and C_AuctionHouse and C_AuctionHouse.GetBrowseResults then
+            local ok, rows = pcall(C_AuctionHouse.GetBrowseResults)
+            if ok then IngestPreview(rows) end
+        end
         QueuePendingBrowsePass()
     elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
         -- Продолжаем очередь
@@ -916,7 +1043,17 @@ function Auction.CollectPricesForRecipes(recipes)
         for _, id in ipairs(cfg.WOOD_ITEM_IDS) do woodSet[id] = true end
     end
 
-    local function Collect(id)
+    local function Collect(id, role)
+        if type(id) ~= "number" then return end
+        -- Роль важна даже для уже обработанного id: от неё зависит, что показывать —
+        -- минимум (крафтовый предмет) или среднее 10 дешёвых единиц (реагент).
+        -- Приоритет у output: если предмет и крафтится, и используется как реагент,
+        -- в колонке «цена продажи» показываем минимум.
+        if role == "output" then
+            itemRole[id] = "output"
+        elseif itemRole[id] ~= "output" then
+            itemRole[id] = role or "reagent"
+        end
         if handled[id] then return end
         handled[id] = true
         if woodSet[id] then
@@ -938,6 +1075,12 @@ function Auction.CollectPricesForRecipes(recipes)
             -- рескан — иначе цена "забывается" каждый TTL. В need — всё равно.
             local p = Auction.GetCachedPrice(id)
             if p then map[id] = p end
+            -- Совсем нет кэша — берём быструю предварительную (browse) цену, чтобы
+            -- таблица не была пустой; помечаем "~" в UI. Точный запрос всё равно в need.
+            if not p and Auction.GetPreviewPrice then
+                local pv = Auction.GetPreviewPrice(id)
+                if pv then map[id] = pv end
+            end
             table.insert(need, id)
         end
     end
@@ -953,10 +1096,10 @@ function Auction.CollectPricesForRecipes(recipes)
                 local ok, u = pcall(ItemInfo.IsUnsellable, rec.outputItemID)
                 if ok and u == true then skip = true end
             end
-            if not skip then Collect(rec.outputItemID) end
+            if not skip then Collect(rec.outputItemID, "output") end
         end
         for _, r in ipairs(rec.reagents or {}) do
-            if type(r.itemID) == "number" then Collect(r.itemID) end
+            if type(r.itemID) == "number" then Collect(r.itemID, "reagent") end
         end
     end
     -- Древесина, реально используемая рецептами (колонка «цена др.»; cache-only, АХ не ищется)
@@ -970,12 +1113,13 @@ function Auction.CollectPricesForRecipes(recipes)
             end
             if used then break end
         end
-        if used then Collect(woodID) end
+        if used then Collect(woodID, "reagent") end
     end
     return map, need
 end
 
 function Auction.RequestPrices(itemIDs)
+    if itemIDs then Auction.StartPreview(itemIDs) end
     Auction.Enqueue(itemIDs)
 end
 

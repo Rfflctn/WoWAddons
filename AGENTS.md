@@ -85,6 +85,15 @@
     не создавать, не читать, не писать туда. Весь временный вывод (выгрузки команд,
     черновики, промежуточные файлы) — в `.temp/`. Папка `.temp/` внесена в `.gitignore`
     и не коммитится.
+12. Мультиреалм-гейт: весь кросс-реалмовый ПОКАЗ (колонки «На АХ»/«Мои» с fallback
+    «*», тултип-блок по серверам, цены/количества с чужих реалмов) — ТОЛЬКО при
+    `/dlp multirealm on` (`DB.settings.multiRealm`, дефолт off: версия для масс —
+    одномировая, приватная — с флагом on). Сбор и хранение realm-scoped данных
+    НЕ гейтятся (идут всегда, включение сразу показывает историю). Новый показ
+    данных с других игровых миров без проверки `UI.IsMultiRealmEnabled()` запрещён;
+    точки гейта: `addons/DecorLumberProfit/UI/Tooltip.lua` (`AddRealmAuctionLines`),
+    `addons/DecorLumberProfit/UI/TableView.lua` (`FillRow`, `AttachAuctionQuantity`),
+    дефолт флага — `addons/DecorLumberProfit/Config.lua` (`MULTI_REALM = false`).
 
 ## Поддерживающие скрипты
 
