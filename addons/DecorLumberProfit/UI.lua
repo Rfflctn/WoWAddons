@@ -32,5 +32,12 @@ UI._hiddenColumns = {} -- { [colKey] = true } — скрытые колонки 
 UI._columnsPanel = nil
 UI._colChecks = {}
 UI._rowHeightLabel = nil -- цифра степпера высоты строк в футере (MainFrame)
+UI._minimized = false -- окно свёрнуто (только заголовок; кнопка «–» в MainFrame)
+UI._savedHeight = nil -- высота до сворачивания (восстанавливаем при разворачивании)
+UI._minimizeBtn = nil -- кнопка свернуть/развернуть (MainFrame)
+UI._contentWidgets = nil -- виджеты контента, прячущиеся при сворачивании (MainFrame)
+UI._resizeGrip = nil -- уголок ресайза (MainFrame, прячется при сворачивании)
+UI._headerLine = nil -- линия под шапкой (MainFrame, прячется при сворачивании)
+UI._hideLabelFallback = nil -- подпись chkHide при отсутствии chk.Text (MainFrame)
 
 _G.DecorLumberProfitUI = UI

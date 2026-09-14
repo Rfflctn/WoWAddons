@@ -7,7 +7,9 @@
 DecorLumberProfitLocale = {
     enUS = {
         -- Заголовок и кнопки
-        TITLE = "Thalassian Lumber — Profitability Calculator",
+        TITLE = "DecorLumberProfit - Profitability Calculator",
+        TIP_MINIMIZE = "Collapse window",
+        TIP_EXPAND = "Expand window",
         BTN_REFRESH = "Update recipes",
         BTN_PRICES = "Update prices",
         BTN_CLEAR_CACHE = "Reset cache",
@@ -166,7 +168,9 @@ DecorLumberProfitLocale = {
 
     ruRU = {
         -- Заголовок и кнопки
-        TITLE = "Талассийская древесина — калькулятор рентабельности",
+        TITLE = "DecorLumberProfit - калькулятор рентабельности",
+        TIP_MINIMIZE = "Свернуть окно",
+        TIP_EXPAND = "Развернуть окно",
         BTN_REFRESH = "Обновить рецепты",
         BTN_PRICES = "Обновить цены",
         BTN_CLEAR_CACHE = "Сбросить кэш",

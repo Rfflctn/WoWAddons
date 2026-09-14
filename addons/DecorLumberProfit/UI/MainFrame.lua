@@ -18,10 +18,10 @@ local function CreateMainFrame()
         tile = true, tileSize = 32, edgeSize = 32,
         insets = { left = 11, right = 12, top = 12, bottom = 11 }
     })
-    -- Общий фон окна
+    -- Общий фон окна (с запасом под скроллбар и футер: иначе они вылазят за край)
     local windowBG = f:CreateTexture(nil, "BACKGROUND")
-    windowBG:SetPoint("TOPLEFT", 9, -9)
-    windowBG:SetPoint("BOTTOMRIGHT", -10, 10)
+    windowBG:SetPoint("TOPLEFT", 5, -5)
+    windowBG:SetPoint("BOTTOMRIGHT", -5, 3)
     windowBG:SetColorTexture(0.04, 0.04, 0.06, 0.95)
     -- Тонкая внутренняя линия под шапкой
     local headerLine = f:CreateTexture(nil, "BACKGROUND")
@@ -29,6 +29,7 @@ local function CreateMainFrame()
     headerLine:SetPoint("TOPRIGHT", -14, -58)
     headerLine:SetHeight(1)
     headerLine:SetColorTexture(1, 0.82, 0, 0.25)
+    UI._headerLine = headerLine
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
@@ -44,6 +45,7 @@ local function CreateMainFrame()
     if f.SetResizeBounds then f:SetResizeBounds(700, 400, 1400, 900) end
     if f.StartSizing then
         local grip = CreateFrame("Button", nil, f)
+        UI._resizeGrip = grip
         grip:SetSize(16, 16)
         grip:SetPoint("BOTTOMRIGHT", -4, 4)
         grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
@@ -67,6 +69,27 @@ local function CreateMainFrame()
     local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -6, -6)
     close:SetScript("OnClick", function() f:Hide() end)
+
+    -- Кнопка «Свернуть» (слева от X, только значок без текста):
+    -- минус = свернуть, плюс = развернуть. Тултип подсказывает действие.
+    local minBtn = CreateFrame("Button", nil, f)
+    minBtn:SetSize(24, 24)
+    minBtn:SetPoint("RIGHT", close, "LEFT", -2, 0)
+    minBtn:SetNormalTexture("Interface\\Buttons\\UI-MinusButton-Up")
+    minBtn:SetPushedTexture("Interface\\Buttons\\UI-MinusButton-Down")
+    minBtn:SetHighlightTexture("Interface\\Buttons\\UI-MinusButton-Highlight")
+    minBtn:SetScript("OnClick", function() UI.ToggleMinimized() end)
+    minBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if UI.IsMinimized and UI.IsMinimized() then
+            GameTooltip:SetText(L.TIP_EXPAND)
+        else
+            GameTooltip:SetText(L.TIP_MINIMIZE)
+        end
+        GameTooltip:Show()
+    end)
+    minBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    UI._minimizeBtn = minBtn
 
     -- Панель кнопок
     local btnRefresh = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -140,21 +163,22 @@ local function CreateMainFrame()
     end)
     btnTop:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Чекбокс «Скрыть неизученное»
+    -- Чекбокс «Скрыть неизученное» — в заголовке окна (слева), подпись справа от галочки
     local chkHide = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
     chkHide:SetSize(24, 24)
-    chkHide:SetPoint("RIGHT", btnTop, "LEFT", -8, 0)
+    chkHide:SetPoint("TOPLEFT", 16, -10)
     if chkHide.Text then
         chkHide.Text:ClearAllPoints()
-        chkHide.Text:SetPoint("RIGHT", chkHide, "LEFT", -2, 0)
+        chkHide.Text:SetPoint("LEFT", chkHide, "RIGHT", 2, 0)
         chkHide.Text:SetWordWrap(false)
         chkHide.Text:SetText(L.CHK_HIDE_UNLEARNED)
         chkHide.Text:SetFontObject("GameFontHighlightSmall")
     else
         local chkLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        chkLabel:SetPoint("RIGHT", chkHide, "LEFT", -2, 0)
+        chkLabel:SetPoint("LEFT", chkHide, "RIGHT", 2, 0)
         chkLabel:SetWordWrap(false)
         chkLabel:SetText(L.CHK_HIDE_UNLEARNED)
+        UI._hideLabelFallback = chkLabel
     end
     chkHide:SetChecked(UI.hideUnlearned)
     chkHide:SetScript("OnClick", function(self)
@@ -327,10 +351,122 @@ local function CreateMainFrame()
         UI.RefreshTable()
     end)
 
+    -- Виджеты контента (прячутся при сворачивании; заголовок, chkHide, minBtn и close остаются)
+    UI._contentWidgets = {
+        btnRefresh, btnAuction, btnClearCache, btnClearTable, btnTop,
+        statusText, healthDot, header, scrollFrame,
+        btnColumns, rowsLabel, btnRowMinus, rowVal, btnRowPlus,
+        UI._headerLine, UI._resizeGrip,
+    }
+
     UI._mainFrame = f
     -- Панель чекбоксов — после шапки, чтобы подписи совпадали с заголовками
     UI.BuildColumnsPanel(f, btnColumns)
     return f
+end
+
+-- ==== Сворачивание окна (кнопка «–» слева от X) ====
+-- Прячет контент, оставляя только заголовок + chkHide + кнопки свернуть/закрыть.
+-- Высоту сохраняем и восстанавливаем; ресайз-границы на время сужаем по низу,
+-- иначе SetHeight(62) упрётся в минимум 400. Все вызовы за гардами (п.6 AGENTS).
+--
+-- Верх фиксируем: окно создано с якорем CENTER, поэтому голое SetHeight двигает
+-- и верхний край (кнопка «уезжает»). Перед ресайзом перепривязываем фрейм за
+-- TOPLEFT в текущих координатах (GetLeft/GetTop) — тогда едет только низ.
+-- GetLeft/GetTop могут вернуть nil (позиция ещё не зафиксирована) — тогда
+-- молча откатываемся к обычному SetHeight без фиксации.
+local function KeepTopHeight(frame, newH)
+    if not (frame and frame.SetHeight and type(newH) == "number") then return false end
+    local left, top
+    if frame.GetLeft and frame.GetTop then
+        local okL, l = pcall(frame.GetLeft, frame)
+        local okT, t = pcall(frame.GetTop, frame)
+        if okL and type(l) == "number" and okT and type(t) == "number" then
+            left, top = l, t
+        end
+    end
+    local parent = _G.UIParent
+    if left and top and parent and frame.ClearAllPoints and frame.SetPoint then
+        -- Приводим координаты к пространству parent (для детей UIParent обычно 1:1,
+        -- поправка нужна лишь при расхождении effective scale).
+        local k = 1
+        if frame.GetEffectiveScale and parent.GetEffectiveScale then
+            local okF, fs = pcall(frame.GetEffectiveScale, frame)
+            local okP, ps = pcall(parent.GetEffectiveScale, parent)
+            if okF and okP and type(fs) == "number" and type(ps) == "number"
+                and fs ~= 0 and ps ~= 0 and fs ~= ps then
+                k = fs / ps
+            end
+        end
+        pcall(frame.ClearAllPoints, frame)
+        pcall(frame.SetPoint, frame, "TOPLEFT", parent, "BOTTOMLEFT", left * k, top * k)
+    end
+    local ok = pcall(frame.SetHeight, frame, newH)
+    return ok and true or false
+end
+
+function UI.IsMinimized()
+    return UI._minimized and true or false
+end
+
+function UI.RefreshMinimizeButton()
+    local b = UI._minimizeBtn
+    if not (b and b.SetNormalTexture) then return end
+    if UI.IsMinimized() then
+        pcall(b.SetNormalTexture, b, "Interface\\Buttons\\UI-PlusButton-Up")
+        if b.SetPushedTexture then pcall(b.SetPushedTexture, b, "Interface\\Buttons\\UI-PlusButton-Down") end
+        if b.SetHighlightTexture then pcall(b.SetHighlightTexture, b, "Interface\\Buttons\\UI-PlusButton-Highlight") end
+    else
+        pcall(b.SetNormalTexture, b, "Interface\\Buttons\\UI-MinusButton-Up")
+        if b.SetPushedTexture then pcall(b.SetPushedTexture, b, "Interface\\Buttons\\UI-MinusButton-Down") end
+        if b.SetHighlightTexture then pcall(b.SetHighlightTexture, b, "Interface\\Buttons\\UI-MinusButton-Highlight") end
+    end
+end
+
+function UI.SetMinimized(min)
+    local f = UI._mainFrame
+    if not f then return false end
+    min = min and true or false
+    if UI.IsMinimized() == min then return true end
+    UI._minimized = min
+    if UI._contentWidgets then
+        for _, w in ipairs(UI._contentWidgets) do
+            if w then
+                if min then
+                    if w.Hide then pcall(w.Hide, w) end
+                else
+                    if w.Show then pcall(w.Show, w) end
+                end
+            end
+        end
+    end
+    -- Панель «Столбцы» при сворачивании всегда прячем (на разворачивании не возвращаем —
+    -- пользователь откроет сам; иначе она всплывёт без спроса).
+    if min and UI._columnsPanel and UI._columnsPanel.Hide then
+        pcall(UI._columnsPanel.Hide, UI._columnsPanel)
+    end
+    if min then
+        if f.GetHeight and f.SetHeight then
+            local ok, h = pcall(f.GetHeight, f)
+            if ok and type(h) == "number" and h > 120 then UI._savedHeight = h end
+        end
+        if f.SetResizeBounds then pcall(f.SetResizeBounds, f, 700, 60, 1400, 900) end
+        KeepTopHeight(f, 62)
+    else
+        -- Сначала высота (границы ещё ослаблены, клампа нет), затем строгие границы.
+        local cfg = _G.DecorLumberProfitConfig
+        local defH = (cfg and cfg.UI and cfg.UI.HEIGHT) or 550
+        KeepTopHeight(f, UI._savedHeight or defH)
+        if f.SetResizeBounds then pcall(f.SetResizeBounds, f, 700, 400, 1400, 900) end
+        UI._savedHeight = nil
+    end
+    UI.RefreshMinimizeButton()
+    if not min then UI.RefreshTable() end
+    return true
+end
+
+function UI.ToggleMinimized()
+    return UI.SetMinimized(not UI.IsMinimized())
 end
 
 -- Перераскладка шапки под текущие ширины колонок (Этап 9: ресайз)
