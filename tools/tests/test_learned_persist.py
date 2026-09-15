@@ -135,3 +135,37 @@ UnitName = OLD_U_BARE
     check('learner display keeps legacy bare',
           'table.concat(DecorLumberProfitUI.GetLearnerNames({ learnedBy = { Bob = true } }), ",")',
           'Bob')
+
+    # ---- sticky-true: живой false не стирает явный true (мультиперсовый сценарий) ----
+    # main выучил (true), alt видит рецепт серым (false): скан alt'а и RefreshLearnedFlags
+    # с false обязаны сохранить true основного персонажа, иначе имена тихо гаснут.
+    exec_(r'''
+OLD_U_STICK = UnitName
+OLD_GI_STICK = C_TradeSkillUI.GetRecipeInfo
+DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424250, recipeID=1010, name="Sticky",
+    outputItemID=999002, learned=true,
+    reagents={ { itemID=256963, quantity=2 } } })
+UnitName = function() return "Alt" end
+C_TradeSkillUI.GetRecipeInfo = function(id) return { learned = false } end
+DecorLumberProfitStore.SaveRecipe({ recipeSpellID=424250, recipeID=1010, name="Sticky",
+    outputItemID=999002, learned=false,
+    reagents={ { itemID=256963, quantity=2 } } })
+STICK_DB_MAIN = DecorLumberProfitDB.recipes[424250].learnedBy["Tester-TestRealm"]
+STICK_DB_ALT = DecorLumberProfitDB.recipes[424250].learnedBy["Alt-TestRealm"]
+RL_STICK = { { recipeSpellID = 424250, learned = false } }
+DecorLumberProfitStore.RefreshLearnedFlags(RL_STICK)
+STICK_RF_MAIN = DecorLumberProfitDB.recipes[424250].learnedBy["Tester-TestRealm"]
+STICK_RF_ALT = DecorLumberProfitDB.recipes[424250].learnedBy["Alt-TestRealm"]
+STICK_MEM = RL_STICK[1].learned
+STICK_CELL = DecorLumberProfitUI.FormatLearnedCell(RL_STICK[1])
+STICK_ANYONE = DecorLumberProfitDB.recipes[424250].learned
+UnitName = OLD_U_STICK
+C_TradeSkillUI.GetRecipeInfo = OLD_GI_STICK
+''')
+    check('sticky save keeps main true', 'tostring(STICK_DB_MAIN)', 'true')
+    check('sticky save records alt false', 'tostring(STICK_DB_ALT)', 'false')
+    check('sticky refresh keeps main true', 'tostring(STICK_RF_MAIN)', 'true')
+    check('sticky refresh records alt false', 'tostring(STICK_RF_ALT)', 'false')
+    check('sticky memory keeps current-toon false', 'tostring(STICK_MEM)', 'false')
+    check('sticky cell still shows main', 'STICK_CELL', 'Tester')
+    check('sticky anyone-flag true', 'tostring(STICK_ANYONE)', 'true')

@@ -1,5 +1,6 @@
 -- UI.lua | MacrosIconSwitcher | Retail 12.1.0
--- The macro table window: one row per macro with a checkbox and an icon-ID field.
+-- The macro table window: one row per macro with a checkbox, an icon-ID field,
+-- a "pick from list" button and a preview of the icon that will be applied.
 -- Window is created lazily on first /mis and then reused. No game logic here (see Core.lua).
 
 local Addon = _G.MacrosIconSwitcher
@@ -14,22 +15,29 @@ Addon.UI = UI
 local unpack = unpack or table.unpack
 
 UI.FRAME_NAME = "MacrosIconSwitcherFrame"
+UI.PICKER_NAME = "MacrosIconSwitcherPicker"
 UI._frame = nil
 UI._built = false
 UI._rows = {}
 UI._macros = {}
+UI._picker = nil
+UI._pickerTarget = nil
+UI._pickerPool = {}
+UI._iconList = nil
 
 local C = Config.UI
+local P = Config.PICKER
 
 -- Column origins relative to the content area (0 = left edge of the scroll child).
 local function contentX(n)
     if n == 1 then return 0 end
     if n == 2 then return C.COL_CHECK end
     if n == 3 then return C.COL_CHECK + C.COL_NAME end
-    return C.COL_CHECK + C.COL_NAME + C.COL_CURRENT
+    if n == 4 then return C.COL_CHECK + C.COL_NAME + C.COL_CURRENT end
+    return C.COL_CHECK + C.COL_NAME + C.COL_CURRENT + C.COL_PREVIEW
 end
 
-local CONTENT_WIDTH = C.COL_CHECK + C.COL_NAME + C.COL_CURRENT + C.COL_ICON
+local CONTENT_WIDTH = C.COL_CHECK + C.COL_NAME + C.COL_CURRENT + C.COL_PREVIEW + C.COL_ICON
 
 function UI.IsShown()
     return UI._frame and UI._frame:IsShown()
@@ -45,13 +53,26 @@ end
 function UI.RefreshRow(row)
     local macro = row.macro
     if not macro then return end
-    local entry = Addon.Core.GetEntry(macro.name)
+    local entry = Addon.Core.GetEntry(macro.name, macro.perCharacter)
     local enabled = (entry and entry.enabled) and true or false
 
     row.check:SetChecked(enabled)
     row.nameText:SetText(macro.name)
     row.iconBox:SetShown(enabled)
+    row.pickBtn:SetShown(enabled)
     row.iconBox:SetText((entry and entry.icon) and tostring(entry.icon) or "")
+
+    -- Preview: the icon that will be applied.
+    if enabled and entry and Addon.Core.IsValidIcon(entry.icon) then
+        -- invalid user-entered FileDataIDs must not break the whole refresh
+        if pcall(row.preview.SetTexture, row.preview, entry.icon) then
+            row.preview:Show()
+        else
+            row.preview:Hide()
+        end
+    else
+        row.preview:Hide()
+    end
 
     if macro.icon and macro.icon ~= 0 then
         row.curIcon:SetTexture(macro.icon)
@@ -73,16 +94,17 @@ local function commitIcon(row)
     local id = tonumber(text)
     if id and id > 0 then
         id = math.floor(id)
-        Addon.Core.SetEntry(macro.name, true, id)
+        Addon.Core.SetEntry(macro.name, macro.perCharacter, true, id)
         row.check:SetChecked(true)
         row.iconBox:SetShown(true)
-        if Addon.Core.ApplyByName(macro.name) then
+        row.pickBtn:SetShown(true)
+        if Addon.Core.ApplyMacro(macro) then
             UI.SetStatus(TL("ST_APPLIED", tostring(id), macro.name), Config.COLORS.OK)
         else
             UI.SetStatus(TL("ST_FAILED", macro.name), Config.COLORS.ERR)
         end
     else
-        Addon.Core.SetEntry(macro.name, true, nil)
+        Addon.Core.SetEntry(macro.name, macro.perCharacter, true, nil)
         UI.SetStatus(L.ST_INVALID_ID, Config.COLORS.ERR)
     end
 
@@ -118,10 +140,11 @@ local function CreateRow(parent, i)
         local macro = row.macro
         if not macro then return end
         local checked = cb:GetChecked() and true or false
-        Addon.Core.SetEntry(macro.name, checked, nil)
+        Addon.Core.SetEntry(macro.name, macro.perCharacter, checked, nil)
         row.iconBox:SetShown(checked)
+        row.pickBtn:SetShown(checked)
         if checked then
-            local entry = Addon.Core.GetEntry(macro.name)
+            local entry = Addon.Core.GetEntry(macro.name, macro.perCharacter)
             if not (entry and entry.icon) then row.iconBox:SetText("") end
             row.iconBox:SetFocus()
         end
@@ -149,10 +172,16 @@ local function CreateRow(parent, i)
     row.curText = curText
     attachTooltip(curText, L.TIP_CURRENT)
 
+    local preview = row:CreateTexture(nil, "ARTWORK")
+    preview:SetSize(18, 18)
+    preview:SetPoint("LEFT", row, "LEFT", contentX(4), 0)
+    row.preview = preview
+    attachTooltip(preview, L.TIP_PREVIEW)
+
     local box = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
     box:SetHeight(20)
-    box:SetWidth(C.COL_ICON - 14)
-    box:SetPoint("LEFT", row, "LEFT", contentX(4), 0)
+    box:SetWidth(C.COL_ICON - 44)
+    box:SetPoint("LEFT", row, "LEFT", contentX(5), 0)
     box:SetAutoFocus(false)
     box:SetNumeric(true)
     box:SetMaxLetters(10)
@@ -169,11 +198,20 @@ local function CreateRow(parent, i)
     attachTooltip(box, L.TIP_ICON)
     row.iconBox = box
 
+    local pick = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    pick:SetSize(24, 24)
+    pick:SetPoint("LEFT", box, "RIGHT", 4, 0)
+    pick:SetText("…")
+    pick:SetScript("OnClick", function() UI.OpenPicker(row) end)
+    attachTooltip(pick, L.TIP_PICKER)
+    row.pickBtn = pick
+
     return row
 end
 
 function UI.Refresh()
     if not UI._frame or not UI._scrollChild then return end
+    Addon.Core.ReconcileLegacy()
     local macros = Addon.Core.GetAllMacros()
     UI._macros = macros
 
@@ -214,6 +252,170 @@ function UI.ApplyAll()
             (failed > 0) and Config.COLORS.ERR or Config.COLORS.OK)
     end
 end
+
+-- ---------------------------------------------------------------------------
+-- Icon picker popup (shared, one instance, opened from a row).
+-- ---------------------------------------------------------------------------
+
+function UI.ClosePicker()
+    if UI._picker then UI._picker:Hide() end
+    UI._pickerTarget = nil
+end
+
+local function pickerCommit(row, id)
+    local macro = row.macro
+    if not macro then return end
+    Addon.Core.SetEntry(macro.name, macro.perCharacter, true, id)
+    row.check:SetChecked(true)
+    if Addon.Core.ApplyMacro(macro) then
+        UI.SetStatus(TL("ST_APPLIED", tostring(id), macro.name), Config.COLORS.OK)
+    else
+        UI.SetStatus(TL("ST_FAILED", macro.name), Config.COLORS.ERR)
+    end
+    UI.RefreshRow(row)
+end
+
+-- Virtualized grid: a fixed pool of buttons renders only the visible rows
+-- (GetMacroIcons/GetMacroItemIcons return thousands of icons; creating a button
+-- per icon froze the client). Updated on scroll via UI.RenderPickerGrid.
+local POOL_ROWS = math.ceil((P.HEIGHT - 40) / P.CELL) + 2
+
+local function renderPickerGrid()
+    local child = UI._pickerChild
+    if not child then return end
+    local icons = UI._iconList or {}
+    local total = #icons
+    local totalRows = math.ceil(total / P.COLS)
+    child:SetHeight(P.PAD * 2 + totalRows * P.CELL)
+
+    if total == 0 then
+        for _, b in ipairs(UI._pickerPool) do b:Hide() end
+        return
+    end
+
+    local offset = 0
+    if UI._pickerScroll and UI._pickerScroll.GetVerticalScroll then
+        offset = UI._pickerScroll:GetVerticalScroll() or 0
+    end
+    local firstRow = math.floor(math.max(offset - P.PAD, 0) / P.CELL)
+    if firstRow < 0 then firstRow = 0 end
+    if firstRow > totalRows then firstRow = totalRows end
+
+    local pool = UI._pickerPool
+    local needed = POOL_ROWS * P.COLS
+    for k = #pool + 1, needed do
+        local b = CreateFrame("Button", nil, child)
+        b:SetSize(P.CELL, P.CELL)
+        b.icon = b:CreateTexture(nil, "ARTWORK")
+        b.icon:SetAllPoints(b)
+        b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        b:SetScript("OnClick", function(self)
+            if UI._pickerTarget then pickerCommit(UI._pickerTarget, self.iconID) end
+            UI.ClosePicker()
+        end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText(tostring(self.iconID), 1, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        pool[k] = b
+    end
+
+    local used = 0
+    for r = 0, POOL_ROWS - 1 do
+        local rowIdx = firstRow + r
+        if rowIdx >= totalRows then break end
+        for c = 0, P.COLS - 1 do
+            local idx = rowIdx * P.COLS + c + 1
+            used = used + 1
+            local b = pool[used]
+            if idx <= total then
+                b:ClearAllPoints()
+                b:SetPoint("TOPLEFT", child, "TOPLEFT",
+                    P.PAD + c * P.CELL, -(P.PAD + rowIdx * P.CELL))
+                b.iconID = icons[idx]
+                -- hide rows with invalid fileIDs instead of erroring mid-render
+                if pcall(b.icon.SetTexture, b.icon, icons[idx]) then
+                    b:Show()
+                else
+                    b:Hide()
+                end
+            else
+                b:Hide()
+            end
+        end
+    end
+    for j = used + 1, #pool do pool[j]:Hide() end
+end
+
+function UI.RenderPickerGrid() renderPickerGrid() end
+
+function UI.OpenPicker(row)
+    if not UI._picker then return end
+    UI._pickerTarget = row
+    UI._iconList = Addon.Core.GetIconList() -- rescan: the icon pool may have changed
+    if #UI._iconList == 0 then
+        UI.SetStatus(L.ST_PICKER_EMPTY, Config.COLORS.ERR)
+        UI._pickerTarget = nil
+        return
+    end
+    if UI._pickerScroll and UI._pickerScroll.SetVerticalScroll then
+        UI._pickerScroll:SetVerticalScroll(0)
+    end
+    -- Anchor to the left of the main window so the macro table stays readable;
+    -- if there is no room the frame is clamped to the screen. Draggable anyway.
+    UI._picker:ClearAllPoints()
+    UI._picker:SetPoint("TOPRIGHT", UI._frame, "TOPLEFT", -8, -4)
+    UI._picker:Show()
+    renderPickerGrid()
+end
+
+local function BuildPicker(parent)
+    local pf = CreateFrame("Frame", UI.PICKER_NAME, parent, "BackdropTemplate")
+    pf:SetSize(P.WIDTH, P.HEIGHT)
+    pf:SetFrameStrata("DIALOG")
+    pf:SetToplevel(true)
+    pf:SetClampedToScreen(true)
+    pf:SetMovable(true)
+    pf:EnableMouse(true)
+    pf:RegisterForDrag("LeftButton")
+    pf:SetScript("OnDragStart", pf.StartMoving)
+    pf:SetScript("OnDragStop", pf.StopMovingOrSizing)
+    pf:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+
+    local title = pf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", pf, "TOP", 0, -10)
+    title:SetText(L.PICK_TITLE)
+
+    local close = CreateFrame("Button", nil, pf, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -2, -2)
+    close:SetScript("OnClick", function() UI.ClosePicker() end)
+
+    local scroll = CreateFrame("ScrollFrame", "$parentScroll", pf, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", pf, "TOPLEFT", 8, -28)
+    scroll:SetPoint("BOTTOMRIGHT", pf, "BOTTOMRIGHT", -(8 + 16), 8)
+    UI._pickerScroll = scroll
+    scroll:HookScript("OnVerticalScroll", function() UI.RenderPickerGrid() end)
+
+    local child = CreateFrame("Frame", nil, scroll)
+    child:SetSize(P.WIDTH - 32, 1)
+    scroll:SetScrollChild(child)
+    UI._pickerChild = child
+
+    pf:Hide()
+    UI._picker = pf
+    table.insert(UISpecialFrames, UI.PICKER_NAME)
+end
+
+-- ---------------------------------------------------------------------------
+-- Main window
+-- ---------------------------------------------------------------------------
 
 function UI.Build()
     if UI._built and UI._frame then return UI._frame end
@@ -265,7 +467,8 @@ function UI.Build()
     headerLabel(1, "HEAD_ON")
     headerLabel(2, "HEAD_NAME", C.COL_NAME - 6)
     headerLabel(3, "HEAD_CURRENT", C.COL_CURRENT - 6)
-    headerLabel(4, "HEAD_ICON", C.COL_ICON - 6)
+    headerLabel(4, "HEAD_TARGET")
+    headerLabel(5, "HEAD_ICON", C.COL_ICON - 6)
 
     local scroll = CreateFrame("ScrollFrame", "$parentScroll", f, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", f, "TOPLEFT", C.LEFT, -(54 + C.HEADER_HEIGHT))
@@ -279,9 +482,24 @@ function UI.Build()
 
     local status = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", C.LEFT + 4, 16)
-    status:SetWidth(300)
+    status:SetWidth(220)
     status:SetJustifyH("LEFT")
     UI._status = status
+
+    -- Minimap button visibility toggle.
+    local lblMini = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    lblMini:SetPoint("LEFT", status, "RIGHT", 8, 0)
+    lblMini:SetText(L.CHK_MINIMAP)
+    local chkMini = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    chkMini:SetSize(20, 20)
+    chkMini:SetPoint("LEFT", lblMini, "RIGHT", 2, 0)
+    chkMini:SetScript("OnClick", function(cb)
+        if Addon.Minimap then
+            Addon.Minimap.SetHidden(not (cb:GetChecked() and true or false))
+        end
+    end)
+    attachTooltip(chkMini, L.TIP_MINIMAP)
+    UI._chkMinimap = chkMini
 
     local btnApply = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     btnApply:SetSize(120, 24)
@@ -297,6 +515,7 @@ function UI.Build()
 
     -- Publish only once fully built: a mid-build error must not leave a
     -- half-initialised frame behind (otherwise the next Build returns early).
+    BuildPicker(f)
     UI._frame = f
     UI._built = true
     table.insert(UISpecialFrames, UI.FRAME_NAME)
@@ -309,7 +528,11 @@ function UI.Toggle(show)
     if show then
         UI.Refresh()
         UI._frame:Show()
+        if UI._chkMinimap and Addon.Minimap then
+            UI._chkMinimap:SetChecked(not Addon.Minimap.IsHidden())
+        end
     else
+        UI.ClosePicker()
         UI._frame:Hide()
     end
 end

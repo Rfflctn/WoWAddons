@@ -97,3 +97,53 @@ TV_RH_LOADED = DecorLumberProfitUI.LoadRowHeight()
     check('rowheight reject low', 'tostring(TV_RH_BAD)', 'false')
     check('rowheight unchanged', 'tostring(TV_RH_STILL)', '24')
     check('rowheight load restores', 'tostring(TV_RH_LOADED)', '24')
+    # LoadFromDB retry: флаг _loadedFromDB — только при реальной загрузке или
+    # пустой базе; холодный вход (всё в pending) флага не ставит — OnShow повторит
+    exec_(r'''
+DB_REC_A = { recipeSpellID=424251, recipeID=1011, name="Relog Recipe A",
+  profession="Carpentry", outputItemID=999002, outputQty=1,
+  woodQty=2, woodItemID=256963, learned=true,
+  reagents={ {itemID=256963, quantity=2, isWood=true} } }
+DB_REC_B = { recipeSpellID=424252, recipeID=1012, name="Relog Recipe B",
+  profession="Carpentry", outputItemID=999001, outputQty=1,
+  woodQty=1, woodItemID=256963, learned=true,
+  reagents={ {itemID=256963, quantity=1, isWood=true} } }
+DecorLumberProfitCore:SaveRecipe(DB_REC_A)
+DecorLumberProfitCore:SaveRecipe(DB_REC_B)
+-- холодный вход: пустые кэши предметов (SaveRecipe выше их прогрел — сбрасываем)
+DecorLumberProfitItemInfo._bindCache = {}
+DecorLumberProfitItemInfo._nameCache = {}
+DecorLumberProfitItemInfo._pending = {}
+DecorLumberProfitItemInfo._loadRequested = {}
+COLD2_CITEM = C_Item.GetItemInfo
+COLD2_GI = GetItemInfo
+C_Item.GetItemInfo = function(id) return nil end
+GetItemInfo = function(id) return nil end
+DecorLumberProfitUI._currentRecipes = {}
+DecorLumberProfitUI._loadedFromDB = false
+COLD_LOAD = DecorLumberProfitUI.LoadFromDB()
+COLD_FLAG = DecorLumberProfitUI._loadedFromDB
+COLD_MEM = #DecorLumberProfitUI._currentRecipes
+COLD_PEND = DecorLumberProfitItemInfo.PendingCount()
+C_Item.GetItemInfo = COLD2_CITEM
+GetItemInfo = COLD2_GI
+WARM_LOAD = DecorLumberProfitUI.LoadFromDB()
+WARM_FLAG = DecorLumberProfitUI._loadedFromDB
+WARM_MEM = #DecorLumberProfitUI._currentRecipes
+''')
+    check('cold load returns 0', 'COLD_LOAD', '0')
+    check('cold load keeps flag false', 'tostring(COLD_FLAG)', 'false')
+    check('cold load memory empty', 'COLD_MEM', '0')
+    check('cold load parks both', 'COLD_PEND', '2')
+    check('retry load returns 2', 'WARM_LOAD', '2')
+    check('retry load sets flag', 'tostring(WARM_FLAG)', 'true')
+    check('retry fills memory', 'WARM_MEM', '2')
+    exec_(r'''
+DecorLumberProfitCore:ClearSavedRecipes()
+DecorLumberProfitUI._currentRecipes = {}
+DecorLumberProfitUI._loadedFromDB = false
+EMPTY_LOAD = DecorLumberProfitUI.LoadFromDB()
+EMPTY_FLAG = DecorLumberProfitUI._loadedFromDB
+''')
+    check('empty db load returns 0', 'EMPTY_LOAD', '0')
+    check('empty db sets flag (nothing to retry)', 'tostring(EMPTY_FLAG)', 'true')

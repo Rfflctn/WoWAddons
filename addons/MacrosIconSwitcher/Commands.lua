@@ -56,8 +56,14 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         if arg1 ~= Addon.NAME then return end
         Addon.EnsureDB()
         L10n.SetLocale(L10n.DetectLocale())
+        if Addon.Minimap then
+            Addon.Minimap.Ensure()
+            Addon.Minimap.RegisterCompartment()
+        end
     elseif event == "PLAYER_LOGIN" then
         Addon.EnsureDB()
+        Core.ReconcileLegacy() -- schema 1 flat icons -> global/char buckets (needs macro list)
+        if Addon.Minimap then Addon.Minimap.Ensure() end
         loginApply = Core.IsAutoEnabled()
         if loginApply then
             if C_Timer and C_Timer.After then
