@@ -244,3 +244,141 @@ C_AuctionHouse.GetItemSearchResultInfo = OLD_II
 ''')
     check('item row fallback price', 'P_IROWQ', '900')
     check('item row fallback qty is row sum', 'E_IROWQ.qty', '5')
+
+    # ---- external source: Auctionator (optional, auto with native fallback) ----
+    exec_(r'''
+Auctionator = { API = { v1 = { GetAuctionPriceByItemID = function(id)
+    if id == 900101 then return 45000 end
+    if id == 900105 then return 77000 end
+    if id == 900102 then return "garbage" end
+    return nil
+end } } }
+DecorLumberProfitPrices.ClearPriceCache()
+EXT_AVAIL = DecorLumberProfitPrices.IsAuctionatorAvailable()
+EXT_P1 = DecorLumberProfitPrices.GetExternalPrice(900101)
+EXT_P2 = DecorLumberProfitPrices.GetExternalPrice(900102)
+EXT_P3 = DecorLumberProfitPrices.GetExternalPrice(900103)
+EXT_SRC = DecorLumberProfitPrices.GetConfiguredPriceSource()
+EXT_ACTIVE = DecorLumberProfitPrices.IsExternalActive()
+MAPX, NEEDX, EXTN = DecorLumberProfitPrices.CollectPricesForRecipes({
+    { recipeSpellID=51, outputItemID=900101, reagents={ {itemID=900103, quantity=1} } },
+})
+EXT_ENTRY_SRC = DecorLumberProfitDB.priceCache.TestRealm[900101].source
+EXT_IMP, EXT_MISS = DecorLumberProfitPrices.ImportFromAuctionator({ 900101, 900105, 900103 })
+''')
+    check('auctionator detected', 'tostring(EXT_AVAIL)', 'true')
+    check('external price hit', 'EXT_P1', '45000')
+    check('external garbage -> nil', 'tostring(EXT_P2)', 'nil')
+    check('external miss -> nil', 'tostring(EXT_P3)', 'nil')
+    check('default source auto', 'EXT_SRC', 'auto')
+    check('external active in auto', 'tostring(EXT_ACTIVE)', 'true')
+    check('collect imports external price', 'MAPX[900101]', '45000')
+    check('collect leaves unknown out of map', 'tostring(MAPX[900103])', 'nil')
+    check('collect external import count', 'EXTN', '1')
+    check('collect need only misses', '#NEEDX', '1')
+    check('collect need miss id', 'NEEDX[1]', '900103')
+    check('external entry tagged', 'EXT_ENTRY_SRC', 'auctionator')
+    check('batch import count (fresh skipped)', 'EXT_IMP', '1')
+    check('batch import missing', '#EXT_MISS', '1')
+    check('batch import missing id', 'EXT_MISS[1]', '900103')
+    exec_(r'''
+DecorLumberProfitPrices.ClearPriceCache()
+SETNATIVE_OK = DecorLumberProfitPrices.SetPriceSource("native")
+EXT_ACTIVE_N = DecorLumberProfitPrices.IsExternalActive()
+MAPN, NEEDN = DecorLumberProfitPrices.CollectPricesForRecipes({
+    { recipeSpellID=51, outputItemID=900101, reagents={ {itemID=900103, quantity=1} } },
+})
+SETBAD_OK = DecorLumberProfitPrices.SetPriceSource("bogus")
+SETAUTO_OK = DecorLumberProfitPrices.SetPriceSource("auto")
+SETSRC_SAVED = DecorLumberProfitDB.settings.priceSource
+''')
+    check('set native ok', 'tostring(SETNATIVE_OK)', 'true')
+    check('native disables external', 'tostring(EXT_ACTIVE_N)', 'false')
+    check('native collect needs both', '#NEEDN', '2')
+    check('native collect map empty', 'tostring(MAPN[900101])', 'nil')
+    check('invalid source rejected', 'tostring(SETBAD_OK)', 'false')
+    check('set auto ok', 'tostring(SETAUTO_OK)', 'true')
+    check('source persisted to settings', 'SETSRC_SAVED', 'auto')
+    exec_(r'''
+Auctionator.API.v1.GetAuctionPriceByItemID = function(id) error("boom") end
+EXT_ERR = DecorLumberProfitPrices.GetExternalPrice(900101)
+Auctionator = nil
+EXT_AVAIL_OFF = DecorLumberProfitPrices.IsAuctionatorAvailable()
+EXT_ACTIVE_OFF = DecorLumberProfitPrices.IsExternalActive()
+QIX = DecorLumberProfitPrices.GetQueueInfo()
+''')
+    check('broken auctionator api -> nil (no throw)', 'tostring(EXT_ERR)', 'nil')
+    check('missing auctionator not available', 'tostring(EXT_AVAIL_OFF)', 'false')
+    check('auto without auctionator falls back', 'tostring(EXT_ACTIVE_OFF)', 'false')
+    check('queueinfo exposes source', 'QIX.source', 'auto')
+    check('queueinfo exposes external flag', 'tostring(QIX.external)', 'false')
+
+    # ---- owned snapshots: speculative refresh must not clobber good data ----
+    exec_(r'''
+TEST_OWNED_AUCTIONS = { { itemKey = { itemID = 900201 }, quantity = 7 } }
+DecorLumberProfitPrices.RefreshOwnedAuctions(true)
+OWN_AUTH = DecorLumberProfitPrices.GetAuctionStats(900201)
+TEST_OWNED_AUCTIONS = {}
+SPEC_KEEP_OK = DecorLumberProfitPrices.RefreshOwnedAuctions(false)
+OWN_SPEC = DecorLumberProfitPrices.GetAuctionStats(900201)
+AUTH_CLEAR_OK = DecorLumberProfitPrices.RefreshOwnedAuctions(true)
+OWN_AUTH_EMPTY = DecorLumberProfitPrices.GetAuctionStats(900201)
+''')
+    check('authoritative write stores lots', 'OWN_AUTH.ownQty', '7')
+    check('speculative empty keeps snapshot', 'tostring(SPEC_KEEP_OK)', 'true')
+    check('speculative empty keeps qty', 'OWN_SPEC.ownQty', '7')
+    check('speculative empty keeps known', 'tostring(OWN_SPEC.ownKnown)', 'true')
+    check('authoritative empty clears', 'tostring(AUTH_CLEAR_OK)', 'true')
+    check('authoritative empty qty zero', 'OWN_AUTH_EMPTY.ownQty', '0')
+    check('authoritative empty still known', 'tostring(OWN_AUTH_EMPTY.ownKnown)', 'true')
+    exec_(r'''
+DecorLumberProfitDB.ownedAuctions = {}
+TEST_OWNED_AUCTIONS = {}
+SPEC_FIRST_OK = DecorLumberProfitPrices.RefreshOwnedAuctions(false)
+OWN_SPEC_FIRST = DecorLumberProfitPrices.GetAuctionStats(900201)
+TEST_OWNED_AUCTIONS = nil
+''')
+    check('speculative empty on blank writes snapshot', 'tostring(SPEC_FIRST_OK)', 'true')
+    check('blank snapshot known', 'tostring(OWN_SPEC_FIRST.ownKnown)', 'true')
+    check('blank snapshot qty zero', 'OWN_SPEC_FIRST.ownQty', '0')
+
+    # ---- reset clears owned snapshots too ("Мои" не переживает сброс кэша) ----
+    exec_(r'''
+TEST_OWNED_AUCTIONS = { { itemKey = { itemID = 900301 }, quantity = 3 } }
+DecorLumberProfitPrices.RefreshOwnedAuctions(true)
+OWN_PRE_RESET = DecorLumberProfitPrices.GetAuctionStats(900301)
+DecorLumberProfitPrices.ClearPriceCache()
+OWN_POST_RESET = DecorLumberProfitPrices.GetAuctionStats(900301)
+-- чтение через OwnedRoot пересоздаёт пустую realm-корзину: проверяем её пустоту
+OWNED_BUCKET_EMPTY = DecorLumberProfit.CountTable(DecorLumberProfitDB.ownedAuctions.TestRealm)
+TEST_OWNED_AUCTIONS = nil
+''')
+    check('owned present before reset', 'OWN_PRE_RESET.ownQty', '3')
+    check('reset wipes owned stats', 'tostring(OWN_POST_RESET)', 'nil')
+    check('reset wipes owned bucket', 'OWNED_BUCKET_EMPTY', '0')
+    exec_(r'''
+TEST_OWNED_AUCTIONS = { { itemKey = { itemID = 900301 }, quantity = 3 } }
+DecorLumberProfitPrices.RefreshOwnedAuctions(true)
+TEST_REALM = "OtherRealm"
+TEST_REALM_NAME = "Other Realm"
+DecorLumberProfitPrices.InitializeRealm()
+TEST_OWNED_AUCTIONS = { { itemKey = { itemID = 900302 }, quantity = 5 } }
+DecorLumberProfitPrices.RefreshOwnedAuctions(true)
+DecorLumberProfitPrices.ClearPriceCache("TestRealm")
+OWN_SCOPED_KEPT = DecorLumberProfitPrices.GetAuctionStats(900302)
+OWN_SCOPED_GONE = DecorLumberProfitPrices.GetAuctionStats(900301, "TestRealm")
+TEST_REALM = "TestRealm"
+TEST_REALM_NAME = "Test Realm"
+DecorLumberProfitPrices.InitializeRealm()
+TEST_OWNED_AUCTIONS = nil
+''')
+    check('scoped reset keeps other realm owned', 'OWN_SCOPED_KEPT.ownQty', '5')
+    check('scoped reset wipes realm owned', 'tostring(OWN_SCOPED_GONE)', 'nil')
+    exec_(r'''
+TEST_OWNED_AUCTIONS = { { itemKey = { itemID = 900303 }, quantity = 2 } }
+DecorLumberProfitPrices.RefreshOwnedAuctions(true)
+DecorLumberProfitPrices.ClearOwnedAuctions("TestRealm")
+OWN_DIRECT_GONE = DecorLumberProfitPrices.GetAuctionStats(900303)
+TEST_OWNED_AUCTIONS = nil
+''')
+    check('direct owned clear wipes realm', 'tostring(OWN_DIRECT_GONE)', 'nil')

@@ -1,0 +1,15 @@
+## Interface: 120100
+## Title: MacrosIconSwitcher
+## Notes: Changes macro icons: pick macros in a table and assign the icon FileDataID, applied automatically on login.
+## Notes-ruRU: Меняет иконки макросов: выбери макросы в таблице, задай FileDataID иконки — применяется автоматически при входе в игру.
+## Author: Muse Spark
+## Version: 1.0.0
+## SavedVariables: MacrosIconSwitcherDB
+## IconTexture: 134400
+
+Locales.lua
+Init.lua
+Config.lua
+Core.lua
+UI.lua
+Commands.lua

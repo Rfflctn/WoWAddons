@@ -10,7 +10,8 @@
 AGENTS.md                  # маршрутизация и жёсткие правила (читать вторым)
 PROJECT-INDEX.md           # этот файл
 opencode.json              # конфиг модели (lmstudio, локалка)
-addons/DecorLumberProfit/   # ЕДИНСТВЕННЫЙ аддон с кодом (TOC + 20×Lua: см. §2)
+addons/DecorLumberProfit/   # основной аддон: калькулятор рентабельности (TOC + 20×Lua: см. §2)
+addons/MacrosIconSwitcher/  # второй аддон: смена иконок макросов (TOC + 6×Lua: см. §2.1)
 tools/                     # поиск API, проверки, тесты: run_tests.py + tests/test_*.py (12 сьютов)
 wiki-lua/                  # архив доков (~8 тыс. файлов) — СМ. ГЕЙТ В §1, по умолчанию НЕ трогать
 .temp/                     # временные рабочие файлы агента (см. AGENTS.md п.11), в git не коммитится
@@ -44,6 +45,20 @@ wiki-lua/                  # архив доков (~8 тыс. файлов) —
 - Проверки после правок Lua: `python tools/syntax_check.py` → `python tools/run_tests.py` → `python tools/check_locales.py` (строгий: missing/diff/fmt = FAIL). Кодовую сессию начинать с `python tools/check_version.py`, заканчивать бампом `.toc` + `Init.lua` + CHANGELOG (+ `test_init.py`, там версия захардкожена) и повторным `check_version.py`. `tools/smoke_test.py` — legacy (загрузчик синхронизирован с `.toc`, гейтом не является). Мета-проверка дрейфа доков: `python tools/check_docs.py` (сьюты/ссылки).
 - Тесты: `tools/tests/stub.lua` (стабы WoW, STUB v1) + `tools/tests/test_*.py`: `test_money`, `test_economy`, `test_recipes` (Scan active/all, ветки ошибок, флаги), `test_prices`, `test_wood` (+parity Wood≡Config), `test_diag`, `test_init` (контракт SafeCall!), `test_iteminfo`, `test_store` (Upgrade/adopt/cap), `test_learned_persist` (learned-флаг: recipeID-мэппинг, roundtrip, холодный логин), `test_tableview` (VisibleRange, ColWidth), `test_removed_apis` (denylist удалённых Midnight-API: lupa-стабы их не ловят). Порядок загрузки Lua читается из `.toc`, у каждого сьюта свежий рантайм (изоляции, зависимости между сьютами запрещены).
 - Пути относительные от корня; абсолютных `W:\...` быть не должно. Имя папки аддона = имени `.toc`.
+
+## 2.1 MacrosIconSwitcher (второй аддон, смена иконок макросов)
+
+Полностью независим от DecorLumberProfit: свой `VERSION`, `DB_SCHEMA` и CHANGELOG, общих таблиц нет.
+Свой неймспейс `MacrosIconSwitcher`, сохранение `MacrosIconSwitcherDB` (account-wide, ключ — имя макроса).
+
+- `addons/MacrosIconSwitcher/MacrosIconSwitcher.toc` — `Interface: 120100`, порядок Lua: Locales → Init → Config → Core → UI → Commands.
+- `addons/MacrosIconSwitcher/Init.lua` — неймспейс, `VERSION`, `DB_SCHEMA`, `EnsureDB` (создание/починка SavedVariables).
+- `addons/MacrosIconSwitcher/Config.lua` — размеры/цвета UI.
+- `addons/MacrosIconSwitcher/Core.lua` — `GetAllMacros` (`GetNumMacros`/`GetMacroInfo`), `GetEntry/SetEntry/ClearAll`, `ApplyIcon`/`ApplyByName`/`ApplyAll` (`EditMacro(index, nil, fileID, nil)` — имя/тело не трогаются; идемпотентно; defer в бою через `_pending`; guard `IsApplying` против своих же `UPDATE_MACROS`).
+- `addons/MacrosIconSwitcher/UI.lua` — окно-таблица: строка на макрос, чекбокс «Вкл» + поле FileDataID; `UI.Build/Refresh/RefreshRow/Toggle/ApplyAll`; слэш-рамка, `UISpecialFrames`.
+- `addons/MacrosIconSwitcher/Commands.lua` — `/mis` и `/macroicons` (`apply|on|off|reset|help`), события `ADDON_LOADED`/`PLAYER_LOGIN`/`UPDATE_MACROS`/`PLAYER_REGEN_ENABLED`, авто-применение на логине через `C_Timer.After`.
+- `addons/MacrosIconSwitcher/Locales.lua` — тексты enUS/ruRU (`L`/`TL`).
+- Проверки: общие `syntax_check.py`/`run_tests.py`/`check_locales.py`/`check_version.py` привязаны к DecorLumberProfit и этот аддон не покрывают — для него нужен ручной smoke-test в клиенте.
 
 ## 3. wiki-lua/ — ON-DEMAND (читать раздел ТОЛЬКО при гейте «нужна»)
 

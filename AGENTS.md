@@ -5,6 +5,7 @@
 
 Проект: база знаний по разработке WoW-аддонов (Retail, патч 12.1.0 / Midnight)
 + код аддона в `addons/DecorLumberProfit/` (TOC + 20×Lua: Init, Config, Core, UI, Locales + Data/Wood + Services/ItemInfo, Recipes, Store, Economy, Prices, Diag + Util/Money + UI/Status, Tooltip, TableView, Actions, MainFrame, Popups, Commands; `DecorLumberProfitAuction` — legacy-алиас Prices).
++ второй аддон `addons/MacrosIconSwitcher/` (TOC + 6×Lua: Init, Config, Core, UI, Locales, Commands — смена иконок макросов по FileDataID, авто-применение при входе; свои `VERSION`/`DB_SCHEMA`/CHANGELOG, не связан с DecorLumberProfit).
 
 ## Карта источников (по убыванию приоритета)
 
