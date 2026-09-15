@@ -368,7 +368,12 @@ function Auction.GetAuctionStats(itemID, realmKey)
     }
 end
 
-function Auction.RefreshOwnedAuctions()
+-- Снимок своих лотов. authoritative=true — сервер только что прислал данные
+-- (OWNED_AUCTIONS_UPDATED): пишем как есть, пусто = «действительно ничего нет».
+-- authoritative=false/nil — спекулятивный опрос (таймер после AUCTION_HOUSE_SHOW):
+-- данные могут быть ещё не готовы, поэтому пустой ответ НЕ затирает хороший
+-- снимок (иначе «Мои» молча обнуляется до следующего удачного скана).
+function Auction.RefreshOwnedAuctions(authoritative)
     local realmKey = EnsureRealm()
     if not realmKey or not C_AuctionHouse then return false end
     local rows = nil
@@ -405,22 +410,40 @@ function Auction.RefreshOwnedAuctions()
         end)
     end
     local root = OwnedRoot(realmKey)
-    root[CurrentCharacter()] = { updatedAt = Now(), items = items }
+    local me = CurrentCharacter()
+    if not authoritative then
+        local fresh = 0
+        for _ in pairs(items) do fresh = fresh + 1 end
+        if fresh == 0 then
+            local prev = root[me]
+            local prevCount = 0
+            if type(prev) == "table" and type(prev.items) == "table" then
+                for _ in pairs(prev.items) do prevCount = prevCount + 1 end
+            end
+            if prevCount > 0 then
+                if DecorLumberProfit and DecorLumberProfit.Log then
+                    DecorLumberProfit.Log("VERBOSE", "Prices", "Owned snapshot not ready yet, keeping %d lots", prevCount)
+                end
+                return true
+            end
+        end
+    end
+    root[me] = { updatedAt = Now(), items = items }
     NotifyPriceUpdate()
     return true
 end
 
-local function QueueOwnedRefresh()
+local function QueueOwnedRefresh(authoritative)
     if ownedRefreshQueued then return end
     ownedRefreshQueued = true
     if C_Timer and C_Timer.After then
         C_Timer.After(0.2, function()
             ownedRefreshQueued = false
-            Auction.RefreshOwnedAuctions()
+            Auction.RefreshOwnedAuctions(authoritative)
         end)
     else
         ownedRefreshQueued = false
-        Auction.RefreshOwnedAuctions()
+        Auction.RefreshOwnedAuctions(authoritative)
     end
 end
 
@@ -445,6 +468,23 @@ function Auction.ClearPriceCache(realmKey)
     priceCache = RealmBucket(realmKey) or {}
     previewCache = {}
     previewTargets = {}
+    -- «Сбросить кэш» сбрасывает и «Мои»: колонка своих лотов — тоже кэш
+    -- (снимки), а не живые данные; scope тот же: конкретный реалм или всё.
+    Auction.ClearOwnedAuctions(requestedRealm and realmKey or nil)
+end
+
+-- Сброс снимков своих лотов («Мои»). Scope как у ClearPriceCache: realmKey —
+-- только этот реалм, nil — все реалмы. Отдельной памяти нет (OwnedStats читает
+-- DB напрямую), достаточно удалить записи — следующий снимок придёт с АХ.
+function Auction.ClearOwnedAuctions(realmKey)
+    if not DecorLumberProfitDB then return end
+    if realmKey then
+        if DecorLumberProfitDB.ownedAuctions then
+            DecorLumberProfitDB.ownedAuctions[realmKey] = nil
+        end
+    else
+        DecorLumberProfitDB.ownedAuctions = {}
+    end
 end
 
 function Auction.IsPending(itemID) return pending[itemID] end
@@ -973,7 +1013,8 @@ eventFrame:RegisterEvent("OWNED_AUCTIONS_UPDATED")
 
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "AUCTION_HOUSE_SHOW" or event == "OWNED_AUCTIONS_UPDATED" then
-        QueueOwnedRefresh()
+        -- SHOW — спекулятивно (данные могут догружаться), UPDATED от сервера — авторитетно
+        QueueOwnedRefresh(event == "OWNED_AUCTIONS_UPDATED")
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_RECEIVED" then
         local itemID = arg1
         if type(itemID) == "number" then
@@ -1028,12 +1069,106 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
     end
 end)
 
+-- ==== Внешний источник цен (Auctionator, опционально) ====
+-- Auctionator.API.v1.GetAuctionPriceByItemID(itemID) -> copper | nil
+-- ("last scanned price" из базы сканов Auctionator). Только чтение чужой базы:
+-- синхронно, без throttle и без открытого АХ. Отдаёт ТОЛЬКО цену (без
+-- qty/listings) — колонки «На АХ»/«Мои» при таком источнике показывают прочерк.
+-- nil/мусор = «данных нет»: в need для native fallback, НЕ маркируем noauction
+-- (иначе затёрли бы lastPrice ложным отсутствием). Все вызовы за pcall + WARN
+-- в Diag при поломке API (AGENTS п.6: guard не молчит о поломке).
+local externalWarned = false
+
+function Auction.IsAuctionatorAvailable()
+    local A = _G.Auctionator
+    if type(A) ~= "table" then return false end
+    local api = A.API
+    if type(api) ~= "table" then return false end
+    local v1 = api.v1
+    if type(v1) ~= "table" then return false end
+    return type(v1.GetAuctionPriceByItemID) == "function"
+end
+
+function Auction.GetExternalPrice(itemID)
+    if type(itemID) ~= "number" then return nil end
+    if not Auction.IsAuctionatorAvailable() then return nil end
+    local fn = _G.Auctionator.API.v1.GetAuctionPriceByItemID
+    local ok, value = pcall(fn, itemID)
+    if not ok then
+        if not externalWarned and DecorLumberProfit and DecorLumberProfit.Log then
+            DecorLumberProfit.Log("WARN", "Prices", "Auctionator API failed, native fallback")
+        end
+        externalWarned = true
+        return nil
+    end
+    value = tonumber(value)
+    if value and value > 0 then return value end
+    return nil
+end
+
+-- Эффективный источник: "auctionator" | "native".
+-- Настройка AUCTION.PRICE_SOURCE ("auto"|"native"|"auctionator", персист
+-- DB.settings.priceSource): auto = auctionator при наличии API, иначе native.
+-- Без Auctionator поведение 1:1 как раньше при любом значении.
+local function IsValidSource(v)
+    return v == "auto" or v == "native" or v == "auctionator"
+end
+
+function Auction.GetConfiguredPriceSource()
+    local db = _G.DecorLumberProfitDB
+    local saved = db and db.settings and db.settings.priceSource
+    if type(saved) == "string" and IsValidSource(saved) then return saved end
+    local cfg = _G.DecorLumberProfitConfig and _G.DecorLumberProfitConfig.AUCTION
+    local v = cfg and cfg.PRICE_SOURCE
+    if type(v) == "string" and IsValidSource(v) then return v end
+    return "auto"
+end
+
+function Auction.SetPriceSource(src)
+    if type(src) ~= "string" or not IsValidSource(src) then return false end
+    DecorLumberProfitConfig = DecorLumberProfitConfig or {}
+    DecorLumberProfitConfig.AUCTION = DecorLumberProfitConfig.AUCTION or {}
+    DecorLumberProfitConfig.AUCTION.PRICE_SOURCE = src
+    DecorLumberProfitDB = DecorLumberProfitDB or {}
+    DecorLumberProfitDB.settings = DecorLumberProfitDB.settings or {}
+    DecorLumberProfitDB.settings.priceSource = src
+    return true
+end
+
+function Auction.IsExternalActive()
+    local src = Auction.GetConfiguredPriceSource()
+    if src == "native" then return false end
+    -- "auto" и "auctionator": external только при живом API; иначе тихий native fallback
+    return Auction.IsAuctionatorAvailable()
+end
+
+-- Мгновенный импорт списка itemID из Auctionator в общий кэш (realm-bucket,
+-- source="auctionator", штамп TouchPriceUpdate через SetPrice).
+-- Возвращает imported (число), missing (без данных — для native fallback).
+function Auction.ImportFromAuctionator(itemIDs)
+    local imported, missing = 0, {}
+    if type(itemIDs) ~= "table" then return imported, missing end
+    for _, id in ipairs(itemIDs) do
+        if type(id) == "number" and not Auction.HasFreshPrice(id) then
+            local price = Auction.GetExternalPrice(id)
+            if price then
+                Auction.SetPrice(id, price, "auctionator")
+                imported = imported + 1
+            else
+                missing[#missing + 1] = id
+            end
+        end
+    end
+    return imported, missing
+end
+
 -- ==== Сбор цен для списка рецептов (map itemID -> price) ====
 -- map: известные цены; need: уникальные itemID без свежей цены (для очереди запросов)
 function Auction.CollectPricesForRecipes(recipes)
     local map = {}
     local need = {}
     local handled = {}
+    local extImported = 0 -- сколько цен подтянуто из Auctionator за этот вызов
     -- Древесина на аукционе не продаётся: запросы по ней не отправляем вообще.
     -- Только кэш-прочтение для колонки «цена др.»; экономика держится на maxWoodPrice.
     local cfg = DecorLumberProfitConfig
@@ -1081,6 +1216,18 @@ function Auction.CollectPricesForRecipes(recipes)
                 local pv = Auction.GetPreviewPrice(id)
                 if pv then map[id] = pv end
             end
+            -- External-first: синхронный импорт из Auctionator выигрывает у очереди АХ
+            -- (свежая внешняя цена перекрывает и протухшую). Нет данных — в need
+            -- для native fallback, как раньше.
+            if Auction.IsExternalActive() then
+                local ext = Auction.GetExternalPrice(id)
+                if ext then
+                    Auction.SetPrice(id, ext, "auctionator")
+                    map[id] = ext
+                    extImported = extImported + 1
+                    return
+                end
+            end
             table.insert(need, id)
         end
     end
@@ -1115,7 +1262,8 @@ function Auction.CollectPricesForRecipes(recipes)
         end
         if used then Collect(woodID, "reagent") end
     end
-    return map, need
+    -- Третий возврат (extImported) аддитивен: старые колл-сайты на двух значениях не ломаются.
+    return map, need, extImported
 end
 
 function Auction.RequestPrices(itemIDs)
@@ -1143,6 +1291,8 @@ function Auction.GetQueueInfo()
         requested = stats.requested,
         resolved = stats.resolved,
         lastUpdate = Auction.GetLastPriceUpdate(),
+        source = Auction.GetConfiguredPriceSource(),
+        external = Auction.IsExternalActive(),
     }
 end
 

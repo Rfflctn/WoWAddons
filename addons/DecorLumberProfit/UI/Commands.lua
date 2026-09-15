@@ -154,6 +154,20 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                 else
                     print(L.PREFIX_ERR .. L.PRINT_MAXSCAN_USAGE)
                 end
+            elseif msg == "source" then
+                local P = _G.DecorLumberProfitPrices
+                local cur = (P and P.GetConfiguredPriceSource and P.GetConfiguredPriceSource()) or "auto"
+                print(L.PREFIX_OK .. TL("PRINT_SOURCE_SET", cur))
+            elseif msg:find("^source") then
+                local arg = msg:match("^source%s+(%a+)")
+                local P = _G.DecorLumberProfitPrices
+                if arg and P and P.SetPriceSource and P.SetPriceSource(arg) then
+                    if UI.RefreshPriceButton then UI.RefreshPriceButton() end
+                    if UI._mainFrame and UI._mainFrame:IsShown() then UI.RefreshTable() end
+                    print(L.PREFIX_OK .. TL("PRINT_SOURCE_SET", arg))
+                else
+                    print(L.PREFIX_ERR .. L.PRINT_SOURCE_USAGE)
+                end
             else
                 UI.Toggle()
             end
@@ -164,14 +178,10 @@ initFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         if DecorLumberProfitPrices and DecorLumberProfitPrices.InitializeRealm then
             DecorLumberProfitPrices.InitializeRealm()
         end
-        -- Грузим накопленную ОБЩУЮ базу аккаунта (все персонажи) и обновляем learned под текущего
-        local saved = DecorLumberProfitCore:LoadSavedRecipes()
-        if saved and #saved > 0 then
-            UI._currentRecipes = saved
-            pcall(function() DecorLumberProfitCore:RefreshLearnedFlags(UI._currentRecipes) end)
-            table.sort(UI._currentRecipes, function(a, b) return (a.name or "") < (b.name or "") end)
-        end
-        UI._loadedFromDB = true
+        -- Грузим накопленную ОБЩУЮ базу аккаунта (все персонажи) и обновляем learned под текущего.
+        -- Флаг _loadedFromDB внутри LoadFromDB: при холодном кэше предметов всё уходит
+        -- в pending и загрузка даст 0 — тогда флаг не ставится и OnShow повторит попытку.
+        UI.LoadFromDB()
 
     elseif event == "NEW_RECIPE_LEARNED" then
         local recipeID = arg1

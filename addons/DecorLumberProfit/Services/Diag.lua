@@ -126,9 +126,15 @@ local function ProbePrices()
         local ok, qi = pcall(Auction.GetQueueInfo)
         if ok and type(qi) == "table" then
             local active = (qi.queue or 0) + (qi.pending or 0)
+            local src = (Auction.GetConfiguredPriceSource and Auction.GetConfiguredPriceSource()) or "auto"
+            local ext = "no"
+            if Auction.IsExternalActive then
+                local okExt, v = pcall(Auction.IsExternalActive)
+                if okExt then ext = v and "yes" or "no" end
+            end
             return { key = "prices", state = active == 0 and "OK" or "WARN",
-                detail = string.format("realm=%s queue=%d overflow=%d pending=%d cached-note:see '/dlp debug queue'",
-                    tostring(qi.realmName or qi.realm or "?"), qi.queue or 0, qi.overflow or 0, qi.pending or 0) }
+                detail = string.format("realm=%s queue=%d overflow=%d pending=%d source=%s auctionator=%s cached-note:see '/dlp debug queue'",
+                    tostring(qi.realmName or qi.realm or "?"), qi.queue or 0, qi.overflow or 0, qi.pending or 0, src, ext) }
         end
     end
     return { key = "prices", state = "UNKNOWN", detail = "no queue introspection" }

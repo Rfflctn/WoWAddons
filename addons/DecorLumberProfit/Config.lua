@@ -21,6 +21,11 @@ DecorLumberProfitConfig.AUCTION = {
     -- Значения только в памяти и не считаются свежим кэшем.
     PREVIEW_ENABLED = true,
     PREVIEW_CLASSES = { 5, 7, 20 }, -- Enum.ItemClass: Reagent, Tradegoods, Housing
+    -- Источник цен: "auto" (Auctionator при наличии, иначе свой скан),
+    -- "native" (только свой C_AuctionHouse-скан), "auctionator" (только Auctionator).
+    -- Дефолт auto: без Auctionator поведение 1:1 как раньше. Персист —
+    -- DB.settings.priceSource (переживает /reload, применяется в Store.Upgrade).
+    PRICE_SOURCE = "auto",
 }
 
 -- Мультиреалм-гейт: весь кросс-реалмовый ПОКАЗ (блок «данные по серверам»
@@ -63,6 +68,7 @@ DecorLumberProfitConfig.API_CHECKLIST = {
         "C_AuctionHouse.GetOwnedAuctions() -> table<OwnedAuctionInfo>",
         "C_AuctionHouse.GetNumOwnedAuctions() / GetOwnedAuctionInfo(index) -- fallback",
         "C_AuctionHouse.IsThrottledMessageSystemReady() -> bool",
+        "Auctionator.API.v1.GetAuctionPriceByItemID(itemID) -> copper|nil -- optional external source",
         "C_Item.GetItemInfo(itemInfo)",
         "C_CurrencyInfo.GetCoinTextureString(money, fontHeight)",
     },

@@ -111,16 +111,25 @@ local function CreateMainFrame()
     btnAuction:SetSize(150, 22)
     btnAuction:SetPoint("LEFT", btnRefresh, "RIGHT", 8, 0)
     btnAuction:SetText(L.BTN_PRICES)
+    UI.btnAuction = btnAuction
     btnAuction:SetScript("OnClick", function() UI.RequestAuctionUpdate() end)
     btnAuction:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L.TIP_PRICES_TITLE)
-        GameTooltip:AddLine(L.TIP_PRICES_L1, 1, 1, 1)
-        GameTooltip:AddLine(L.TIP_PRICES_L2, 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(L.TIP_PRICES_L3, 1, 0.6, 0.6)
+        local P = _G.DecorLumberProfitPrices
+        if P and P.IsExternalActive and P.IsExternalActive() then
+            GameTooltip:SetText(L.TIP_PRICES_SYNC_TITLE)
+            GameTooltip:AddLine(L.TIP_PRICES_SYNC_L1, 1, 1, 1)
+            GameTooltip:AddLine(L.TIP_PRICES_SYNC_L2, 0.7, 0.7, 0.7)
+        else
+            GameTooltip:SetText(L.TIP_PRICES_TITLE)
+            GameTooltip:AddLine(L.TIP_PRICES_L1, 1, 1, 1)
+            GameTooltip:AddLine(L.TIP_PRICES_L2, 0.7, 0.7, 0.7)
+            GameTooltip:AddLine(L.TIP_PRICES_L3, 1, 0.6, 0.6)
+        end
         GameTooltip:Show()
     end)
     btnAuction:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    if UI.RefreshPriceButton then UI.RefreshPriceButton() end
 
     local btnClearCache = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     btnClearCache:SetSize(110, 22)
@@ -340,10 +349,13 @@ local function CreateMainFrame()
 
     -- События фрейма
     f:SetScript("OnShow", function()
-        -- Первый показ в сессии: поднимаем накопленную (общую) базу из SavedVariables
+        -- Подпись кнопки цен могла устареть (Auctionator вкл/выкл между показами)
+        if UI.RefreshPriceButton then UI.RefreshPriceButton() end
+        -- Первый показ в сессии: поднимаем накопленную (общую) базу из SavedVariables.
+        -- Флаг внутри LoadFromDB: повторяет, пока загрузка не даст строк
+        -- (холодный кэш предметов паркует всё в pending).
         if not UI._loadedFromDB then
             UI.LoadFromDB()
-            UI._loadedFromDB = true
         end
         if #UI._currentRecipes == 0 then
             UI.SetStatus(L.ST_TABLE_EMPTY_ONSHOW, 1, 0.82, 0)

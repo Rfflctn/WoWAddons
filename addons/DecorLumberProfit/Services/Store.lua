@@ -222,6 +222,16 @@ function Store.Upgrade()
     elseif DecorLumberProfitConfig.MULTI_REALM == nil then
         DecorLumberProfitConfig.MULTI_REALM = false
     end
+    -- Источник цен (дефолт auto: Auctionator при наличии API, иначе свой скан).
+    -- Невалидное сохранённое значение игнорируем (остаётся дефолт из Config).
+    local au = DecorLumberProfitConfig.AUCTION or {}
+    local psrc = DecorLumberProfitDB.settings.priceSource
+    if psrc == "auto" or psrc == "native" or psrc == "auctionator" then
+        au.PRICE_SOURCE = psrc
+    elseif au.PRICE_SOURCE == nil then
+        au.PRICE_SOURCE = "auto"
+    end
+    DecorLumberProfitConfig.AUCTION = au
     DecorLumberProfitDB.schemaVersion = target
     _G.DecorLumberProfitDB = DecorLumberProfitDB
     _G.DecorLumberProfitCharDB = DecorLumberProfitCharDB
@@ -328,8 +338,12 @@ function Store.SaveRecipe(rec)
         ser.learnedBy[player] = true
         ser.learned = true
     elseif rec.learned == false then
-        ser.learnedBy[player] = false
-        -- existing.learned — legacy anyone-флаг без владельца: храним (см. AnyoneKnows)
+        -- Sticky-true: живой false НЕ стирает явный true (API врёт на холодную /
+        -- не тот ранг рецепта — иначе мультиперсовые флаги тихо дохнут).
+        -- Смена фракции с реальной потерей рецепта оставит stale-true: приемлемо.
+        if ser.learnedBy[player] ~= true then
+            ser.learnedBy[player] = false
+        end
         ser.learned = AnyoneKnows(ser.learnedBy, existing and existing.learned) and true or false
     else
         if existing then
@@ -500,9 +514,14 @@ function Store.RefreshLearnedFlags(list)
                         ser.learnedBy[player] = true
                         ser.learned = true
                     else
-                        ser.learnedBy[player] = false
+                        -- Sticky-true (см. SaveRecipe): живой false не стирает явный true.
+                        if ser.learnedBy[player] ~= true then
+                            ser.learnedBy[player] = false
+                        end
                         -- ser.learned — legacy anyone-флаг без владельца: храним (см. AnyoneKnows)
                         ser.learned = AnyoneKnows(ser.learnedBy, ser.learned) and true or false
+                        -- Память согласуем с липким флагом, а не с сырым false.
+                        rec.learned = (ser.learnedBy[player] == true) and true or false
                     end
                     rec.learnedBy = ser.learnedBy
                 else

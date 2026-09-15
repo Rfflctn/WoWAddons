@@ -86,9 +86,21 @@ function UI.RebuildRecipeList(showMessage)
 end
 
 -- Поднимает накопленную общую базу рецептов из SavedVariables
+-- Возвращает число добавленных. Флаг _loadedFromDB ставит только когда
+-- загружать больше нечего: либо что-то подняли, либо база правда пуста.
+-- Если всё ушло в pending (холодный кэш предметов при входе) — флаг НЕ ставим,
+-- и OnShow повторит попытку; иначе окно навсегда пустое при полной базе.
 function UI.LoadFromDB()
     local saved = DecorLumberProfitCore:LoadSavedRecipes()
-    if not saved or #saved == 0 then return 0 end
+    if not saved or #saved == 0 then
+        local empty = true
+        if DecorLumberProfitCore.SavedRecipeCount then
+            local ok, n = pcall(DecorLumberProfitCore.SavedRecipeCount, DecorLumberProfitCore)
+            if ok and type(n) == "number" and n > 0 then empty = false end
+        end
+        if empty then UI._loadedFromDB = true end
+        return 0
+    end
     local existing = UI.BuildExistingSet(UI._currentRecipes)
     local loaded = 0
     for _, rec in ipairs(saved) do
@@ -101,6 +113,7 @@ function UI.LoadFromDB()
     -- learned актуализируется под текущего персонажа (в т.ч. learnedBy)
     pcall(function() DecorLumberProfitCore:RefreshLearnedFlags(UI._currentRecipes) end)
     table.sort(UI._currentRecipes, function(a, b) return (a.name or "") < (b.name or "") end)
+    if loaded > 0 then UI._loadedFromDB = true end
     return loaded
 end
 
@@ -127,17 +140,41 @@ function UI.RequestAuctionUpdate()
         UI.SetStatus(L.ST_NO_RECIPES_FOR_PRICES, 1, 0.5, 0)
         return
     end
-    local _, need = DecorLumberProfitPrices.CollectPricesForRecipes(UI._currentRecipes)
+    -- Collect уже подтянул что смог из Auctionator (3-й возврат — счётчик импорта).
+    local _, need, extImported = DecorLumberProfitPrices.CollectPricesForRecipes(UI._currentRecipes)
+    extImported = tonumber(extImported) or 0
     if #need == 0 then
-        UI.SetStatus(TL("ST_PRICES_CACHED", (DecorLumberProfitConfig.AUCTION.PRICE_TTL / 60)) .. UI.PriceTimeSuffix(), 0.7, 0.7, 1)
+        if extImported > 0 then
+            UI.SetStatus(TL("ST_PRICES_AUCTIONATOR_IMPORTED", extImported) .. UI.PriceTimeSuffix(), 0.3, 1, 0.3)
+        else
+            UI.SetStatus(TL("ST_PRICES_CACHED", (DecorLumberProfitConfig.AUCTION.PRICE_TTL / 60)) .. UI.PriceTimeSuffix(), 0.7, 0.7, 1)
+        end
         UI.RefreshTable()
         return
     end
     -- Фильтруем только уникальные
     local uniq, seen = {}, {}
     for _, id in ipairs(need) do if not seen[id] then seen[id] = true; table.insert(uniq, id) end end
-    UI.SetStatus(TL("ST_PRICES_REQUESTED", #uniq) .. UI.PriceTimeSuffix(), 0.3, 0.8, 1)
+    -- Частичное покрытие: префикс говорит сколько уже взял Auctionator, остаток — в очередь АХ.
+    local prefix = ""
+    if extImported > 0 then prefix = TL("ST_PRICES_EXT_PART", extImported) end
+    UI.SetStatus(prefix .. TL("ST_PRICES_REQUESTED", #uniq) .. UI.PriceTimeSuffix(), 0.3, 0.8, 1)
     DecorLumberProfitPrices.RequestPrices(uniq)
+end
+
+-- Подпись кнопки цен под активный источник: external — мгновенный импорт
+-- («Синхр. цены»), native — очередь АХ («Обновить цены»). Кнопка остаётся
+-- включённой в обоих режимах (остаток без данных Auctionator добирается очередью).
+function UI.RefreshPriceButton()
+    local btn = UI.btnAuction
+    if not btn or not btn.SetText then return end
+    local P = _G.DecorLumberProfitPrices
+    local ext = P and P.IsExternalActive and P.IsExternalActive()
+    if ext then
+        pcall(btn.SetText, btn, L.BTN_PRICES_SYNC)
+    else
+        pcall(btn.SetText, btn, L.BTN_PRICES)
+    end
 end
 
 -- Очистка таблицы + общей базы (для кнопки и /dlp clear)
